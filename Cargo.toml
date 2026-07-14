@@ -1,5 +1,5 @@
 [package]
-name = "zipper"
+name = "wasm2c"
 version = "0.1.0"
 edition = "2024"
 
@@ -7,3 +7,4 @@ edition = "2024"
 anyhow = "1.0.103"
 buffer-redux = "1.1.0"
 wasmparser = "0.253.0"
+color-eyre = "0.6"
