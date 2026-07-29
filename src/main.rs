@@ -11,23 +11,25 @@ use std::env::{self, current_dir};
 use std::path::{Path, PathBuf};
 use wasmparser::{
     Chunk, Export, ExternalKind, FuncToValidate, FuncType, FuncValidatorAllocations, FunctionBody, 
-    ModuleArity, Operator, Parser, Payload, TypeRef, ValType, ValidPayload, Validator, 
+    ModuleArity, Operator, Payload, TypeRef, ValType, ValidPayload, Validator, 
     WasmModuleResources
 };
+
+use clap::Parser;
+use clio::*;
 
 
 fn main() -> Result<()> {
 
     // SECTION 1: I/O
-    let mut input_stream = get_input()?;
-    let mut output_stream = get_output_stream(&input_stream.dest_dir, &input_stream.name)?;
+    let mut config = get_config()?;
+    let mut output = get_output(&mut config)?;
 
-    // SECTION 1.5: FILENAME
-    //
+    let mut input_stream = config.reader;
 
     // SECTION 2: BOILERPLATE
-    print_includes(&mut output_stream)?;
-    print_typedefs(&mut output_stream.header)?;
+    print_includes(&mut output)?;
+    print_typedefs(&mut output)?;
    
     // SECTION 3: printing program
     //
@@ -40,104 +42,72 @@ fn main() -> Result<()> {
  */
 #[derive(clap::Parser)]
 struct Args {
-    src: Option<PathBuf>,
+    #[clap(value_parser, default_value="-")]
+    src: clio::Input,
 
-    #[arg(long)]
-    dest: Option<PathBuf>,
+    #[clap(long, short, value_parser = clap::value_parser!(ClioPath).exists().is_dir(), default_value = ".")]
+    dest: clio::ClioPath,
 
-    #[arg(long, required_unless_present = "src")]
+    #[clap(long, short, required_unless_present = "src")]
     name: Option<String>,
 }
 
-struct Input<R: Read> {
+struct Config<R: Read> {
     reader: BufReader<R>,
-    dest_dir: PathBuf,
+    dest_dir: ClioPath,
     name: String,
 }
-
-type Inputs = Input<Box<dyn Read>>;
 
 struct Output<H: Write, C: Write> {
     header: BufWriter<H>,
     source: BufWriter<C>,
-    header_name: String,
-    source_name: String,
+    header_file: String,
+    source_file: String,
 }
-
-type Outputs = Output<Box<dyn Write>, Box<dyn Write>>;
 
 /* SECTION 1.1: INPUT */
-fn get_input() -> Result<Inputs> {
-    let args = <Args as clap::Parser>::parse();
-
-    let dest_dir = match args.dest {
-        Some(dest) => { 
-            if !dest.is_dir() {
-                bail!("Expected directory, got file.");
-            }
-            dest
+fn get_config() -> Result<Config<Box<dyn Read>>> {
+    let args = Args::parse();
+    Ok(Config{ 
+        name: match args.name {
+            Some(name) => name,
+            None => get_src_name(args.src.path())?
         },
-        None => { current_dir()? },
-    };
-
-    match (args.src, args.name) {
-        (Some(src), Some(name)) => {
-            Ok( Input{ reader: get_input_stream(&src)?, dest_dir, name } )
-        },
-        (Some(src), None) => {
-            Ok( Input{ reader: get_input_stream(&src)?, dest_dir, name: get_file_name(&src)? } )
-        },
-        (None, Some(name)) => {
-            Ok( Input{ reader: BufReader::new_ringbuf(Box::new(stdin().lock()) as Box<dyn Read>), dest_dir, name } )
-        },
-        (None, None) => {
-            bail!("If piping into stdin(), requires --name. Else, requires file (with optional --name)")
-        }
-    }
+        reader: BufReader::new_ringbuf(Box::new(args.src)), 
+        dest_dir: args.dest, 
+    })
 }
 
-fn get_input_stream(path: &PathBuf) -> Result<BufReader<Box<dyn Read>>> {
-    let f = File::open(path)?;
-    Ok(BufReader::new_ringbuf(Box::new(f)))
-}
-
-fn get_file_name(path: &PathBuf) -> Result<String> {
-    let path = Path::new(&path);
-    if !path.is_file() {
-        bail!("Not a file.");
-    }
-    
-    let file_name = path.file_stem().ok_or_else(|| anyhow!("expected file name"))?.to_string_lossy();
-    Ok(file_name.to_string())
+fn get_src_name(path: &ClioPath) -> Result<String> {
+    let file_name = path.file_stem().ok_or_else(|| anyhow!("expected file name"))?.to_string_lossy().to_string();
+    Ok(file_name)
 }
 
 /* SECTION 1.2: OUTPUT */
+fn get_output(config: &mut Config<impl Read>) -> Result<Output<Box<dyn Write>, Box<dyn Write>>> {
+    let header_file = format!("{}.h", config.name);
+    let source_file = format!("{}.cc", config.name);
+    let h = File::create(config.dest_dir.join(&header_file).path())?;
+    let s = File::create(config.dest_dir.join(&source_file).path())?;
 
-fn get_output_stream(dest_dir: &PathBuf, name: &String) -> Result<Outputs> {
-    let header_name = format!("{}.h", &name);
-    let source_name = format!("{}.cc", &name);
-    let h = File::create(dest_dir.join(&header_name))?;
-    let s = File::create(dest_dir.join(&source_name))?;
-
-    let out = Output {
+    Ok(Output {
         header: BufWriter::new_ringbuf(Box::new(h) as Box<dyn Write>),
         source: BufWriter::new_ringbuf(Box::new(s) as Box<dyn Write>),
-        header_name: header_name,
-        source_name: source_name,
-    };
-    Ok(out)
+        header_file: header_file,
+        source_file: source_file,
+    })
 }
 
 /* SECTION 2: BOILERPLATE
  * includes and typedefs
  */
-fn print_includes(out: &mut Outputs) -> Result<()> {
+fn print_includes(out: &mut Output<impl Write, impl Write>) -> Result<()> {
     print_header_includes(out)?;
     print_source_includes(out)?;
     Ok(())
 }
 
-fn print_header_includes(out: &mut Outputs) -> Result<()> {
+fn print_header_includes(out: &mut Output<impl Write, impl Write>) -> Result<()> {
     let header_includes = ["<stdint.h>"];
     for inc in header_includes {
         writeln!(out.header, "#include {}", inc)?;
@@ -146,8 +116,8 @@ fn print_header_includes(out: &mut Outputs) -> Result<()> {
     Ok(())
 }
 
-fn print_source_includes(out: &mut Outputs) -> Result<()> {
-    let h_file = format!("\"{}\"", out.header_name);
+fn print_source_includes(out: &mut Output<impl Write, impl Write>) -> Result<()> {
+    let h_file = format!("\"{}\"", out.header_file);
     let source_includes = [h_file.as_str()];
     
     for inc in source_includes {
@@ -157,7 +127,7 @@ fn print_source_includes(out: &mut Outputs) -> Result<()> {
     Ok(())
 }
 
-fn print_typedefs(out: &mut impl Write) -> Result<()> {
+fn print_typedefs(out: &mut Output<impl Write, impl Write>) -> Result<()> {
     let typedefs = [
         ("uint32_t", cc_type(&ValType::I32)),
         ("uint64_t", cc_type(&ValType::I64)),
@@ -166,9 +136,9 @@ fn print_typedefs(out: &mut impl Write) -> Result<()> {
     ];
 
     for td in typedefs {
-        writeln!(out, "typedef {} {};", td.0, td.1)?;
+        writeln!(out.header, "typedef {} {};", td.0, td.1)?;
     }
-    writeln!(out)?;
+    writeln!(out.header)?;
 
     Ok(())
 }
