@@ -1,10 +1,9 @@
 use anyhow::{bail, anyhow, Result};
 use buffer_redux::{BufReader, BufWriter};
-use std::fmt::write;
 use std::io::{BufRead, Read, Write};
 use std::fs::File;
 use wasmparser::{
-    Chunk, Export, ExternalKind, FuncValidator, FuncValidatorAllocations, FunctionBody, ModuleArity, Operator, Parser, Payload, SubType, ValType, ValidPayload, Validator, ValidatorResources, WasmModuleResources
+    Chunk, ExternalKind, FuncValidator, FuncValidatorAllocations, FunctionBody, ModuleArity, Operator, Parser, Payload, SubType, ValType, ValidPayload, Validator, ValidatorResources, WasmModuleResources
 };
 
 use clap::Parser as ClapParser;
@@ -17,8 +16,8 @@ static W2CC: &'static str = "w2cc_";
 static FUNC: &'static str = "fn_";
 static LOCAL: &'static str = "l";
 static DEFAULT_VALUE: &'static str = "0";
-static PUBLIC_SECT: &'static str = "public:";
-static PRIVATE_SECT: &'static str = "private:";
+static PUBLIC_SECT: &'static str = "\npublic:";
+static PRIVATE_SECT: &'static str = "\nprivate:";
 
 fn main() -> Result<()> {
 
@@ -83,7 +82,7 @@ fn get_src_name(path: &ClioPath) -> Result<String> {
 
 /* SECTION 1.2: OUTPUT */
 fn get_output(config: &mut Config<impl Read>) -> Result<Output<Box<dyn Write>, Box<dyn Write>>> {
-    let header_file = format!("{}.h", config.name);
+    let header_file = format!("{}.hh", config.name);
     let source_file = format!("{}.cc", config.name);
     let h = File::create(config.dest_dir.join(&header_file).path())?;
     let s = File::create(config.dest_dir.join(&source_file).path())?;
@@ -183,7 +182,7 @@ fn print_class(input: &mut Config<impl Read>, output: &mut Output<impl Write, im
                     ValidPayload::Func(f, body) => {
                         let func_validator = f.into_validator(allocs);
                         func_metadata.push(func_validator.clone()); // save FuncToValidate for fn signatures later
-                        allocs = print_function(func_validator, body, input, output)?;
+                        allocs = print_function(func_validator, body, output)?;
                     },
                     ValidPayload::Ok => {
                         match payload {
@@ -198,10 +197,8 @@ fn print_class(input: &mut Config<impl Read>, output: &mut Output<impl Write, im
                                 }
                                 // reader => save export info
                             },
-                            Payload::CustomSection(reader) => {
+                            Payload::CustomSection(_) => {
                                 // reader => name info
-
-                        // EXPORT SECTION
                             },
                             _ => {},
                         }
@@ -235,7 +232,6 @@ fn print_class(input: &mut Config<impl Read>, output: &mut Output<impl Write, im
 fn print_function<T: WasmModuleResources> (
     mut f: FuncValidator<T>, 
     body: FunctionBody, 
-    input: &mut Config<impl Read>, 
     output: &mut Output<impl Write, impl Write>
 )-> Result<FuncValidatorAllocations> {
     let func_type = get_function_type(&f);
@@ -254,7 +250,7 @@ fn print_function<T: WasmModuleResources> (
     // ---- OPERANDS ---- //
     print_operands(&mut f, body, output)?;
 
-    writeln!(output.source, "}}")?;
+    writeln!(output.source, "}}\n")?;
     
     Ok(f.into_allocations())
 }
@@ -408,13 +404,13 @@ fn print_operands<T: WasmModuleResources> (
             Operator::I32Const { value } => {
                 print_i32const(value, &mut stack, output)?;
             },
-            Operator::I64Const { value } => {
+            Operator::I64Const { .. } => {
                 // print_i64const(output, value);
             },
-            Operator::F32Const { value } => {
+            Operator::F32Const { .. } => {
                 // print_f32const(output, value);
             },
-            Operator::F64Const { value } => {
+            Operator::F64Const { .. } => {
                 // print_f64const(output, value);
             },
             // ADD
