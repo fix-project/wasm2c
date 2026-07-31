@@ -1,23 +1,22 @@
-// TYPES: i32, i64, f32, f64 -> uint32_t, uint64_t, float, double
+
 // SINGLE RETURN VALUES
 // EXPORT: functions only
 
 use anyhow::{bail, anyhow, Result};
 use buffer_redux::{BufReader, BufWriter};
-use std::io::{Read, Write};
-use std::io::{stdin, stdout};
+use std::io::{BufRead, Read, Write};
 use std::fs::File;
-use std::env::{self, current_dir};
-use std::path::{Path, PathBuf};
 use wasmparser::{
-    Chunk, Export, ExternalKind, FuncToValidate, FuncType, FuncValidatorAllocations, FunctionBody, 
-    ModuleArity, Operator, Payload, TypeRef, ValType, ValidPayload, Validator, 
-    WasmModuleResources
+    Chunk, Export, ExternalKind, FuncToValidate, FuncType, FuncValidator, FuncValidatorAllocations, FunctionBody, ModuleArity, Operator, Parser, Payload, TypeRef, ValType, ValidPayload, Validator, ValidatorResources, WasmModuleResources
 };
 
-use clap::Parser;
+use clap::Parser as ClapParser;
 use clio::*;
+use convert_case::ccase;
 
+/* STRING CONSTANTS */
+static W2CC: &'static str = "w2cc_";
+static FUNC: &'static str = "fn_";
 
 fn main() -> Result<()> {
 
@@ -25,22 +24,20 @@ fn main() -> Result<()> {
     let mut config = get_config()?;
     let mut output = get_output(&mut config)?;
 
-    let mut input_stream = config.reader;
-
     // SECTION 2: BOILERPLATE
     print_includes(&mut output)?;
     print_typedefs(&mut output)?;
    
     // SECTION 3: printing program
     //
-    // print_program(&mut input_stream, &mut output_stream)?;
+    print_program(&mut config, &mut output)?;
 
     Ok(())
 }
 
 /* SECTION 1: I/O
  */
-#[derive(clap::Parser)]
+#[derive(ClapParser)]
 struct Args {
     #[clap(value_parser, default_value="-")]
     src: clio::Input,
@@ -118,7 +115,7 @@ fn print_header_includes(out: &mut Output<impl Write, impl Write>) -> Result<()>
 
 fn print_source_includes(out: &mut Output<impl Write, impl Write>) -> Result<()> {
     let h_file = format!("\"{}\"", out.header_file);
-    let source_includes = [h_file.as_str()];
+    let source_includes = [h_file.as_str(), "<tuple>"];
     
     for inc in source_includes {
         writeln!(out.source, "#include {}", inc)?;
@@ -139,9 +136,143 @@ fn print_typedefs(out: &mut Output<impl Write, impl Write>) -> Result<()> {
         writeln!(out.header, "typedef {} {};", td.0, td.1)?;
     }
     writeln!(out.header)?;
+    Ok(())
+}
+
+
+/* SECTION 3: MAIN PROGRAM LOOP
+ * - functions: immediate generation
+ * - exports: save iterators
+ * - names: last
+ */
+fn print_program(input: &mut Config<impl Read>, output: &mut Output<impl Write, impl Write>)
+-> Result<()>{
+    writeln!(output.source, "class {} {{", ccase!(pascal, &input.name))?;
+    print_class(input, output)?;
+    writeln!(output.source, "}};")?;
 
     Ok(())
 }
+
+fn print_class(input: &mut Config<impl Read>, output: &mut Output<impl Write, impl Write>) -> Result<()> {
+
+    let mut parser = Parser::new(0);
+    let mut eof = false;
+
+    let mut validator = Validator::new();
+    let mut allocs = FuncValidatorAllocations::default();
+
+    let mut func_metadata: Vec<FuncValidator<ValidatorResources>> = Vec::new();
+
+    loop {
+        let buf = input.reader.buffer().iter().cloned().collect::<Vec<_>>();
+        match parser.parse(&buf, eof)? {
+            Chunk::Parsed { consumed, payload } => {
+                match validator.payload(&payload)? {
+                    ValidPayload::Func(f, body) => {
+                        let mut func_validator = f.into_validator(allocs);
+                        func_metadata.push(func_validator.clone()); // save FuncToValidate for fn signatures later
+                        allocs = print_function(func_validator, body, input, output)?;
+                    },
+                    ValidPayload::Ok => {
+                        match payload {
+                            Payload::ExportSection(reader) => {
+                                // reader => save export info
+                            },
+                            Payload::CustomSection(reader) => {
+                                // reader => name info
+                            },
+                            _ => {},
+                        }
+                    },
+                    ValidPayload::Parser(_) => unimplemented!("component model"),
+                    ValidPayload::End(_) => break
+                }
+                input.reader.consume(consumed);
+            },
+            Chunk::NeedMoreData(hint) => {
+                if eof { bail!("unexpected end"); }
+                input.reader.reserve(hint as usize);
+                if input.reader.read_into_buf()? == 0 { eof = true; }
+            },
+        }
+    }
+    Ok(())
+}
+
+fn print_function<T: WasmModuleResources> (
+    f: FuncValidator<T>, 
+    body: FunctionBody, 
+    input: &mut Config<impl Read>, output: &mut Output<impl Write, impl Write>
+)-> Result<FuncValidatorAllocations> {
+    
+    dbg!(f.len_locals());
+    for i in 0..f.len_locals() {
+        dbg!(f.get_local_type(i));
+    } 
+    // <return> w2cc_function_0(<param type> param_0, <type> param_1, ...) {
+    let func_type = get_function_type(&f);
+    writeln!(output.source, "{}", get_function_signature(func_type, LabelType::Index(f.index()), true))?;
+    
+    Ok(f.into_allocations())
+}
+
+fn get_function_type<T: WasmModuleResources> (f: &FuncValidator<T>) -> (&[ValType], &[ValType]) {
+    let func_type_index = f.type_index_of_function(f.index()).unwrap();
+    let func_type = f.sub_type_at(func_type_index).unwrap().unwrap_func();
+    (func_type.params(), func_type.results())
+}
+
+enum LabelType {
+    Name(String),
+    Index(u32),
+}
+fn get_function_signature(func_type: (&[ValType], &[ValType]), label: LabelType, has_param_name: bool) -> String {
+    // PARAMS
+    let params = func_type.0;
+    let mut params_str = String::new();
+    for (i, ty) in params.iter().enumerate() {
+        if i > 0 { 
+            params_str += ", "; 
+        }
+        params_str += cc_type(ty);
+        if has_param_name {
+            params_str += &format!(" p{i}");
+        }
+    }
+
+    // RETURN
+    let results = func_type.1;
+    let mut res_tuple = String::from("std::tuple<");
+    let mut results_str = 
+        match func_type.1.len() {
+            0 => "void",
+            1 => cc_type(&results[0]),
+            _ => {
+                for (i, ty) in results.iter().enumerate() {
+                    if i > 0 {
+                        res_tuple += ", "; 
+                    }
+                    res_tuple += cc_type(ty);
+                }
+                res_tuple += ">";
+                &res_tuple
+            },
+        };
+
+    // NAME
+    let label_str = match label {
+        LabelType::Name(name) => {
+            name
+        },
+        LabelType::Index(u32) => {
+            format!("{W2CC}{FUNC}{u32}")
+        },
+    };
+
+    format!("{} {}({})", results_str, label_str, params_str)
+}
+
 
 /* UTILITIES
  * - types -> string
@@ -156,3 +287,8 @@ fn cc_type(ty: &ValType) -> &'static str {
         _ => unimplemented!(),
     }
 }
+
+fn function_sgn() -> String {
+    todo!()
+}
+
