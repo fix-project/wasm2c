@@ -147,9 +147,9 @@ fn print_typedefs(out: &mut Output<impl Write, impl Write>) -> Result<()> {
  */
 fn print_program(input: &mut Config<impl Read>, output: &mut Output<impl Write, impl Write>)
 -> Result<()>{
-    writeln!(output.source, "class {} {{", ccase!(pascal, &input.name))?;
+    writeln!(output.header, "class {} {{", ccase!(pascal, &input.name))?;
     print_class(input, output)?;
-    writeln!(output.source, "}};")?;
+    writeln!(output.header, "}};")?;
 
     Ok(())
 }
@@ -209,10 +209,17 @@ fn print_function<T: WasmModuleResources> (
     dbg!(f.len_locals());
     for i in 0..f.len_locals() {
         dbg!(f.get_local_type(i));
-    } 
-    // <return> w2cc_function_0(<param type> param_0, <type> param_1, ...) {
+    }
+
     let func_type = get_function_type(&f);
-    writeln!(output.source, "{}", get_function_signature(func_type, LabelType::Index(f.index()), true))?;
+
+    // FUNCTION SIGNATURE (HEADER)
+    writeln!(output.header, "{};", get_function_signature(func_type, LabelType::Index(f.index()), false))?;
+
+    // FUNCTION SIGNATURE (SOURCE)
+    writeln!(output.source, "{} {{", get_function_signature(func_type, LabelType::Index(f.index()), true))?;
+    // print_operands();
+    writeln!(output.source, "}}")?;
     
     Ok(f.into_allocations())
 }
