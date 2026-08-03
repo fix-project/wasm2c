@@ -175,8 +175,8 @@ fn print_class(input: &mut Config<impl Read>, output: &mut Output<impl Write, im
     let mut exports: Vec<ExportCopy> = Vec::new();
 
     loop {
-        let buf = input.reader.buffer().iter().cloned().collect::<Vec<_>>();
-        match parser.parse(&buf, eof)? {
+        let buf = input.reader.buffer();
+        match parser.parse(buf, eof)? {
             Chunk::Parsed { consumed, payload } => {
                 match validator.payload(&payload)? {
                     ValidPayload::Func(f, body) => {
