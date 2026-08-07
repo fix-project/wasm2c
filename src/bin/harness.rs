@@ -199,7 +199,7 @@ fn print_asserts(out: &mut Output<impl Write, impl Write>) -> Result<()> {
 
 // TODO: custom input .wast file later but for now, this'll do
 fn read_wast() -> Result<String> {
-    let text = std::fs::read_to_string("test/assert.wast")?;
+    let text = std::fs::read_to_string("test/mvp.wast")?;
     Ok(text)
 }
 
