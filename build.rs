@@ -21,12 +21,18 @@ fn main() {
 
     println!("path: {llvm:?}");
 
+    // jit.cpp needs the LLVM install prefix at runtime: it drives the clang
+    // driver in-process, and the driver locates its builtin headers (stddef.h
+    // & co.) and the GCC toolchain relative to argv[0]. Left to its own
+    // devices it would resolve that against /proc/self/exe, i.e. whatever Rust
+    // binary we are linked into.
     cc::Build::new()
         .cpp(true)
         .std("c++23")
         .compiler(llvm.join("bin/clang++"))
         .archiver(llvm.join("bin/llvm-ar"))
         .include(llvm.join("include"))
+        .define("LLVM_PREFIX", Some(format!("\"{}\"", llvm.display()).as_str()))
         .flag("-Wno-unused-parameter")
         .file("src/jit.cpp")
         .compile("jit");
