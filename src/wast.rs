@@ -1,36 +1,44 @@
-// TODO:
-// modules need to have their own names
-// split the tests up by module, all asserts on that module called at once
-
-use anyhow::Result;
-use buffer_redux::BufReader;
+use crate::codegen;
+use crate::{config::*, jit};
+use anyhow::{Result, bail, ensure};
+use buffer_redux::{BufReader, BufWriter};
 use clio::ClioPath;
 use convert_case::ccase;
 use std::io::Write;
-use std::path::Path;
-use wasm2c::codegen::compile;
-use wasm2c::config::*;
 use wast::core::{WastArgCore, WastRetCore};
 use wast::parser::{self, ParseBuffer};
 use wast::{Wast, WastArg, WastDirective, WastExecute, WastRet};
 
 static W2CC: &'static str = "w2cc_";
 
-fn main() -> Result<()> {
-    let mut config = get_config()?;
-    let mut output = get_output(&mut config)?;
-    let dest = config.dest_dir.path();
+#[test]
+fn seven() {
+    run_test(include_str!("../samples/seven.wast")).unwrap();
+}
 
-    let text = read_wast()?;
-    let commands = parse_wast(&text, dest)?;
+fn run_test(text: &str) -> Result<()> {
+    let mut header = Vec::new();
+    let mut source = Vec::new();
 
-    // what main.cc needs
-    // class name
-    // what to call it with (func name, params)
-    // what to expect
-    //
+    {
+        let mut output = Output {
+            header: BufWriter::new(&mut header),
+            source: BufWriter::new(&mut source),
+            name: String::from("input"),
+        };
+        let cmds = parse_wast(&text, &mut output)?;
 
-    print_test(commands, &mut output)?;
+        print_test(cmds, &mut output)?;
+    }
+
+    let status = jit::run(
+        &String::from_utf8_lossy(&source),
+        &String::from_utf8_lossy(&header),
+    )?;
+
+    if status != 0 {
+        bail!("test failed to run")
+    }
 
     Ok(())
 }
@@ -201,7 +209,7 @@ fn print_asserts(out: &mut Output<impl Write, impl Write>) -> Result<()> {
         "#define ASSERT_VALUE(result, expected)                \\\
     \n    do {{                                              \\\
     \n        if ((result) != (expected)) {{                 \\\
-    \n            std::cerr << \"result != expected\\n\";       \\\
+    \n            std::cerr << \"assertion failed: \" << result << \" != \" << expected << std::endl;       \\\
     \n            failed = true;                            \\\
     \n        }}                                            \\\
     \n    }} while (0)"
@@ -210,12 +218,6 @@ fn print_asserts(out: &mut Output<impl Write, impl Write>) -> Result<()> {
     writeln!(out.source)?;
 
     Ok(())
-}
-
-// TODO: custom input .wast file later but for now, this'll do
-fn read_wast() -> Result<String> {
-    let text = std::fs::read_to_string("test/mvp.wast")?;
-    Ok(text)
 }
 
 /* SECTION 2: PARSE WAST */
@@ -237,20 +239,23 @@ enum Value {
     // F32, F64
 }
 
-fn parse_wast(text: &str, dest: &Path) -> Result<Vec<Command>> {
+fn parse_wast(text: &str, out: &mut Output<impl Write, impl Write>) -> Result<Vec<Command>> {
     let buf = ParseBuffer::new(text)?;
     let wast = parser::parse::<Wast>(&buf)?;
 
     let mut commands = Vec::new();
     // let mut curr_module: &Command;
 
-    let module_name = "module"; // TODO: this needs to change later
+    // Must match Output::name: codegen qualifies member definitions with the
+    // output name but names the class after the module name, and the JIT
+    // compiles the pair as input.cc / input.hh.
+    let module_name = out.name.clone();
 
     for dir in wast.directives {
         let command = match dir {
             WastDirective::Module(mut module) => {
                 let bytes = module.encode()?;
-                let module = run_wasm2cc(&bytes, dest, module_name)?;
+                let module = run_wasm2cc(&bytes, &module_name, out)?;
                 // curr_module = &module;
                 module
             }
@@ -267,14 +272,21 @@ fn parse_wast(text: &str, dest: &Path) -> Result<Vec<Command>> {
 }
 
 /* bytes of the module -> paths of .cc and .hh */
-fn run_wasm2cc(bytes: &[u8], dest: &Path, name: &str) -> Result<Command> {
+fn run_wasm2cc(
+    bytes: &[u8],
+    name: &str,
+    out: &mut Output<impl Write, impl Write>,
+) -> Result<Command> {
     // let tmp_dir = tempdir()?;
     let mut config = Config {
         name: name.to_string(), // TODO: change later idk
-        dest_dir: ClioPath::new(dest)?,
+        dest_dir: ClioPath::default(),
         reader: BufReader::new(bytes),
     };
-    compile(&mut config)?;
+
+    codegen::print_includes(out)?;
+    codegen::print_typedefs(out)?;
+    codegen::print_program(&mut config, out)?;
 
     Ok(Command::Module { name: config.name })
 }
