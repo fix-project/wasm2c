@@ -2,42 +2,73 @@ use std::{
     ffi::OsString,
     os::unix::ffi::OsStringExt,
     path::PathBuf,
-    process::{Command, Stdio},
+    process::{Command, Output},
 };
+
+fn command(cmd: &str, args: &[&str]) -> Output {
+    Command::new(cmd).args(args).output().unwrap()
+}
+
+fn output_to_path(output: Output) -> PathBuf {
+    PathBuf::from(OsString::from_vec(output.stdout.trim_ascii().to_vec()))
+}
+
+fn output_to_trim(output: Output) -> String {
+    String::from_utf8_lossy(output.stdout.trim_ascii()).to_string()
+}
+
+fn clang_configuration() -> (String, Vec<String>) {
+    let resource_dir = output_to_trim(command("clang", &["-print-resource-dir"]));
+    let probe = command("clang", &["-E", "-x", "c++", "-v", "/dev/null"]);
+    let diagnostics = String::from_utf8_lossy(&probe.stderr);
+
+    let includes = diagnostics
+        .lines()
+        .map(|l| l.trim())
+        .skip_while(|line| *line != "#include <...> search starts here:")
+        .take_while(|line| *line != "End of search list.")
+        .map(|line| line.to_string())
+        .collect::<Vec<_>>();
+
+    (resource_dir, includes)
+}
+
+fn quote(value: &str) -> String {
+    format!("\"{}\"", value.replace('\\', "\\\\").replace('"', "\\\""))
+}
 
 fn main() {
     println!("cargo::rerun-if-changed=src/jit.cpp");
 
-    let prefix_output = Command::new("llvm-config")
-        .arg("--prefix")
-        .stdout(Stdio::piped())
-        .spawn()
-        .unwrap()
-        .wait_with_output()
-        .unwrap();
-    let llvm = PathBuf::from(OsString::from_vec(
-        prefix_output.stdout.trim_ascii().to_vec(),
-    ));
+    let llvm_dir = output_to_path(command("llvm-config", &["--prefix"]));
+    let (resource_dir, include_paths) = clang_configuration();
+    let include_initializer = format!(
+        "{{ {} }}",
+        include_paths
+            .iter()
+            .map(|path| quote(path))
+            .collect::<Vec<_>>()
+            .join(", ")
+    );
 
-    println!("path: {llvm:?}");
-
-    // jit.cpp needs the LLVM install prefix at runtime: it drives the clang
-    // driver in-process, and the driver locates its builtin headers (stddef.h
-    // & co.) and the GCC toolchain relative to argv[0]. Left to its own
-    // devices it would resolve that against /proc/self/exe, i.e. whatever Rust
-    // binary we are linked into.
     cc::Build::new()
         .cpp(true)
         .std("c++23")
-        .compiler(llvm.join("bin/clang++"))
-        .archiver(llvm.join("bin/llvm-ar"))
-        .include(llvm.join("include"))
-        .define("LLVM_PREFIX", Some(format!("\"{}\"", llvm.display()).as_str()))
+        .compiler("clang++")
+        .include(llvm_dir.join("include"))
+        .define(
+            "JIT_CLANG_RESOURCE_DIR",
+            Some(quote(&resource_dir).as_str()),
+        )
+        .define(
+            "JIT_SYSTEM_INCLUDE_PATHS",
+            Some(include_initializer.as_str()),
+        )
         .flag("-Wno-unused-parameter")
         .file("src/jit.cpp")
         .compile("jit");
 
-    let library = llvm.join("lib");
+    let library = llvm_dir.join("lib");
     println!("cargo::rustc-link-search=native={}", library.display());
     println!("cargo::rustc-link-lib=dylib=clang-cpp");
     println!("cargo::rustc-link-lib=dylib=LLVM");
