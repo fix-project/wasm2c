@@ -375,8 +375,8 @@ fn print_operands<T: WasmModuleResources>(
             Operator::I32Const { value } => {
                 print_i32const(value, &mut stack, output)?;
             }
-            Operator::I64Const { .. } => {
-                // print_i64const(output, value);
+            Operator::I64Const { value } => {
+                print_i64const(value, &mut stack, output)?;
             }
             Operator::F32Const { .. } => {
                 // print_f32const(output, value);
@@ -385,6 +385,9 @@ fn print_operands<T: WasmModuleResources>(
                 // print_f64const(output, value);
             }
             // ADD
+            Operator::I32Add {} => {
+                print_i32add(&mut stack, output)?;
+            }
             // SUB
             // MUL
             // DIVS
@@ -458,6 +461,40 @@ fn print_i32const(
         writeln!(out.source, "{} {} = {};", ty, var_name, value)?;
     }
     stack.inc(ValType::I32);
+
+    Ok(())
+}
+
+fn print_i64const(
+    value: i64,
+    stack: &mut TypeStack,
+    out: &mut Output<impl Write, impl Write>,
+) -> Result<()> {
+    let index = stack.get(ValType::I64);
+    let ty = cc_type(&ValType::I64);
+    let var_name = var_name(&ValType::I64, index);
+
+    if stack.declared(ValType::I64) {
+        writeln!(out.source, "{} = {};", var_name, value)?;
+    } else {
+        writeln!(out.source, "{} {} = {};", ty, var_name, value)?;
+    }
+    stack.inc(ValType::I64);
+
+    Ok(())
+}
+
+fn print_i32add(
+    stack: &mut TypeStack,
+    out: &mut Output<impl Write, impl Write>,
+) -> Result<()> {
+    stack.dec(ValType::I32); // pop second
+    let index = stack.get(ValType::I32); // get second index
+
+    let var_first = var_name(&ValType::I32, index - 1);
+    let var_second = var_name(&ValType::I32, index);
+
+    writeln!(out.source, "{} = {} + {};", var_first, var_first, var_second)?;
 
     Ok(())
 }
