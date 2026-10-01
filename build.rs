@@ -8,7 +8,7 @@ use std::{
 fn main() {
     println!("cargo::rerun-if-changed=src/jit.cpp");
 
-    let prefix_output = Command::new("llvm-config")
+    let prefix_output = Command::new("llvm-config-22")
         .arg("--prefix")
         .stdout(Stdio::piped())
         .spawn()
