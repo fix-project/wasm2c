@@ -388,7 +388,16 @@ fn print_operands<T: WasmModuleResources>(
             Operator::I32Add {} => {
                 print_i32add(&mut stack, output)?;
             }
+            Operator::I64Add {} => {
+                print_i64add(&mut stack, output)?;
+            }
             // SUB
+            Operator::I32Sub {} => {
+                print_i32sub(&mut stack, output)?;
+            }
+            Operator::I64Sub {} => {
+                print_i64sub(&mut stack, output)?;
+            }
             // MUL
             // DIVS
             // DIVU
@@ -495,6 +504,51 @@ fn print_i32add(
     let var_second = var_name(&ValType::I32, index);
 
     writeln!(out.source, "{} = {} + {};", var_first, var_first, var_second)?;
+
+    Ok(())
+}
+
+fn print_i64add(
+    stack: &mut TypeStack,
+    out: &mut Output<impl Write, impl Write>,
+) -> Result<()> {
+    stack.dec(ValType::I64); // pop second
+    let index = stack.get(ValType::I64); // get second index
+
+    let var_first = var_name(&ValType::I64, index - 1);
+    let var_second = var_name(&ValType::I64, index);
+
+    writeln!(out.source, "{} = {} + {};", var_first, var_first, var_second)?;
+
+    Ok(())
+}
+
+fn print_i32sub(
+    stack: &mut TypeStack,
+    out: &mut Output<impl Write, impl Write>,
+) -> Result<()> {
+    stack.dec(ValType::I32); // pop second
+    let index = stack.get(ValType::I32); // get second index
+
+    let var_first = var_name(&ValType::I32, index - 1);
+    let var_second = var_name(&ValType::I32, index);
+
+    writeln!(out.source, "{} = {} - {};", var_first, var_first, var_second)?;
+
+    Ok(())
+}
+
+fn print_i64sub(
+    stack: &mut TypeStack,
+    out: &mut Output<impl Write, impl Write>,
+) -> Result<()> {
+    stack.dec(ValType::I64); // pop second
+    let index = stack.get(ValType::I64); // get second index
+
+    let var_first = var_name(&ValType::I64, index - 1);
+    let var_second = var_name(&ValType::I64, index);
+
+    writeln!(out.source, "{} = {} - {};", var_first, var_first, var_second)?;
 
     Ok(())
 }
