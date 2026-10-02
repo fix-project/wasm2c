@@ -22,14 +22,12 @@
 #include <utility>
 #include <vector>
 
-#ifndef LLVM_PREFIX
-#error "LLVM_PREFIX must be defined by build.rs"
+
+#ifndef CLANG_PATH
+#error "CLANG_PATH must be defined by build.rs"
 #endif
 
-// The clang driver derives both its resource directory (builtin headers such
-// as stddef.h) and its GCC toolchain search paths from argv[0]. We are not
-// running as clang++, so point it at the real driver binary explicitly.
-static constexpr const char *kClangPath = LLVM_PREFIX "/bin/clang++";
+static constexpr const char *kClangPath = CLANG_PATH;
 
 using namespace llvm;
 
@@ -80,10 +78,10 @@ extern "C" int run_program(const char *source, std::size_t source_length,
 
     // Resolve against the installed clang, not /proc/self/exe (which is the
     // Rust binary this library is linked into).
-    std::string resource_dir = clang::GetResourcesPath(kClangPath);
     const std::string target = sys::getProcessTriple();
+    const std::string resource_dir = clang::GetResourcesPath(kClangPath);
 
-    // Driver-level arguments ("clang++ ..."), NOT -cc1 arguments. The driver
+	// Driver-level arguments ("clang++ ..."), NOT -cc1 arguments. The driver
     // resolves the C++ standard library include paths for us.
     std::vector<std::string> arg_strings = {
         kClangPath, // argv[0]: puts the driver in C++ mode, and anchors its
@@ -100,6 +98,7 @@ extern "C" int run_program(const char *source, std::size_t source_length,
         "c++",
         "/input.cc",
     };
+
     std::vector<const char *> args;
     args.reserve(arg_strings.size());
     for (const std::string &s : arg_strings) {
