@@ -48,10 +48,7 @@ jobs:
             clang-22 \
             libclang-22-dev \
             libclang-cpp22-dev
-          echo "/usr/lib/llvm-22/bin" >> "$GITHUB_PATH"
       - name: Build wasm2c
-        run: cargo +stable build --locked
+        run: RUSTFLAGS="-Dwarnings" cargo +stable build --locked --all
       - name: Test wasm2c
-        run: cargo +stable test --locked
-      - name: Run execution tests
-        run: cargo +stable test --locked -p test-runner --lib -- --nocapture
+        run: RUSTFLAGS="-Dwarnings" cargo +stable test --locked --all -- --no-capture

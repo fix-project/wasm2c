@@ -1,5 +1,5 @@
 use crate::jit;
-use anyhow::{Result, bail, ensure};
+use anyhow::{Result, ensure};
 use buffer_redux::{BufReader, BufWriter};
 use clio::ClioPath;
 use convert_case::ccase;

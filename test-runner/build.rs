@@ -1,7 +1,7 @@
 use std::{path::PathBuf, process::Command};
 
 fn llvm_config(option: &str) -> String {
-    let output = Command::new("llvm-config")
+    let output = Command::new("llvm-config-22")
         .arg(option)
         .output()
         .expect("install LLVM 22 and Clang 22 development packages");
