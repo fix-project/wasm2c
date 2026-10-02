@@ -1,10 +1,10 @@
-use crate::codegen;
-use crate::{config::*, jit};
+use crate::jit;
 use anyhow::{Result, bail, ensure};
 use buffer_redux::{BufReader, BufWriter};
 use clio::ClioPath;
 use convert_case::ccase;
 use std::io::Write;
+use wasm2c::{codegen, config::*};
 use wast::core::{WastArgCore, WastRetCore};
 use wast::parser::{self, ParseBuffer};
 use wast::{Wast, WastArg, WastDirective, WastExecute, WastRet};
@@ -12,8 +12,8 @@ use wast::{Wast, WastArg, WastDirective, WastExecute, WastRet};
 static W2CC: &'static str = "w2cc_";
 
 #[test]
-fn seven() {
-    run_test(include_str!("../samples/seven.wast")).unwrap();
+fn seven() -> Result<()> {
+    run_test(include_str!("../samples/seven.wast"))
 }
 
 fn run_test(text: &str) -> Result<()> {
@@ -26,9 +26,10 @@ fn run_test(text: &str) -> Result<()> {
             source: BufWriter::new(&mut source),
             name: String::from("input"),
         };
-        let cmds = parse_wast(&text, &mut output)?;
-
-        print_test(cmds, &mut output)?;
+        let commands = parse_wast(&text, &mut output)?;
+        print_test(commands, &mut output)?;
+        output.header.flush()?;
+        output.source.flush()?;
     }
 
     let status = jit::run(
@@ -36,10 +37,7 @@ fn run_test(text: &str) -> Result<()> {
         &String::from_utf8_lossy(&header),
     )?;
 
-    if status != 0 {
-        bail!("test failed to run")
-    }
-
+    ensure!(status == 0, "test failed to run");
     Ok(())
 }
 
@@ -104,6 +102,8 @@ fn print_assert_return(
     curr_module: &String,
     out: &mut Output<impl Write, impl Write>,
 ) -> Result<()> {
+    writeln!(out.source, "{{")?;
+
     let exp_type = print_expect(expect, out)?;
     print_result(func, args, curr_module, expect.is_empty(), out)?;
 
@@ -112,6 +112,7 @@ fn print_assert_return(
         writeln!(out.source, "ASSERT_VALUE(result, expect);")?;
     }
 
+    writeln!(out.source, "}}")?;
     Ok(())
 }
 

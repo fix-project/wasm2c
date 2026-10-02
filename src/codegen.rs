@@ -11,12 +11,11 @@ use convert_case::ccase;
 use crate::config::*;
 
 /* STRING CONSTANTS */
-static W2CC: &'static str = "w2cc_";
-static FUNC: &'static str = "fn_";
-static LOCAL: &'static str = "l";
-static DEFAULT_VALUE: &'static str = "0";
-static PUBLIC_SECT: &'static str = "\npublic:";
-static PRIVATE_SECT: &'static str = "\nprivate:";
+static W2CC: &str = "w2cc_";
+static FUNC: &str = "fn_";
+static LOCAL: &str = "l";
+static DEFAULT_VALUE: &str = "0";
+static PUBLIC_SECT: &str = "\npublic:";
 
 pub fn compile(config: &mut Config<impl Read>) -> Result<()> {
     let mut output = get_output(config)?;
@@ -211,7 +210,7 @@ fn print_locals<T: WasmModuleResources>(
     f: &FuncValidator<T>,
     output: &mut Output<impl Write, impl Write>,
 ) -> Result<()> {
-    let n_params = get_function_type(&f).0.len() as u32;
+    let n_params = get_function_type(f).0.len() as u32;
     for i in n_params..f.len_locals() {
         let local_type = f.get_local_type(i).unwrap();
         let local_str = format!(
@@ -254,12 +253,11 @@ fn get_function_signature(
     let params = func_type.0;
     let mut params_str = String::new();
 
-    for i in 0..params.len() {
+    for (i, param) in params.iter().enumerate() {
         if i > 0 {
             params_str += ", ";
         }
-        let ty = params[i as usize];
-        params_str += cc_type(&ty);
+        params_str += cc_type(param);
         if has_param_name {
             params_str += &format!(" {LOCAL}{i}");
         }
@@ -416,7 +414,7 @@ fn print_return<T: WasmModuleResources>(
     stack: &mut TypeStack,
     output: &mut Output<impl Write, impl Write>,
 ) -> Result<()> {
-    let func_type = get_function_type(&f);
+    let func_type = get_function_type(f);
     let results = func_type.1;
 
     match results.len() {
@@ -432,14 +430,13 @@ fn print_return<T: WasmModuleResources>(
         }
         _ => {
             let mut ret_str = String::from("return {");
-            for i in 0..results.len() {
+            for (i, result) in results.iter().enumerate() {
                 if i > 0 {
                     ret_str += ", ";
                 }
-                let ty = results[i];
-                ret_str += &var_name(&ty, stack.get(ty) - 1);
+                ret_str += &var_name(result, stack.get(*result) - 1);
 
-                stack.dec(ty);
+                stack.dec(*result);
             }
             ret_str += "};";
 
@@ -451,7 +448,7 @@ fn print_return<T: WasmModuleResources>(
 
 // operand codegen
 fn var_name(ty: &ValType, index: i32) -> String {
-    format!("{}_{}", cc_type(&ty), index)
+    format!("{}_{}", cc_type(ty), index)
 }
 
 // [] -> [i32]
@@ -493,67 +490,72 @@ fn print_i64const(
     Ok(())
 }
 
-fn print_i32add(
-    stack: &mut TypeStack,
-    out: &mut Output<impl Write, impl Write>,
-) -> Result<()> {
+fn print_i32add(stack: &mut TypeStack, out: &mut Output<impl Write, impl Write>) -> Result<()> {
     stack.dec(ValType::I32); // pop second
     let index = stack.get(ValType::I32); // get second index
 
     let var_first = var_name(&ValType::I32, index - 1);
     let var_second = var_name(&ValType::I32, index);
 
-    writeln!(out.source, "{} = {} + {};", var_first, var_first, var_second)?;
+    writeln!(
+        out.source,
+        "{} = {} + {};",
+        var_first, var_first, var_second
+    )?;
 
     Ok(())
 }
 
-fn print_i64add(
-    stack: &mut TypeStack,
-    out: &mut Output<impl Write, impl Write>,
-) -> Result<()> {
+fn print_i64add(stack: &mut TypeStack, out: &mut Output<impl Write, impl Write>) -> Result<()> {
     stack.dec(ValType::I64); // pop second
     let index = stack.get(ValType::I64); // get second index
 
     let var_first = var_name(&ValType::I64, index - 1);
     let var_second = var_name(&ValType::I64, index);
 
-    writeln!(out.source, "{} = {} + {};", var_first, var_first, var_second)?;
+    writeln!(
+        out.source,
+        "{} = {} + {};",
+        var_first, var_first, var_second
+    )?;
 
     Ok(())
 }
 
-fn print_i32sub(
-    stack: &mut TypeStack,
-    out: &mut Output<impl Write, impl Write>,
-) -> Result<()> {
+fn print_i32sub(stack: &mut TypeStack, out: &mut Output<impl Write, impl Write>) -> Result<()> {
     stack.dec(ValType::I32); // pop second
     let index = stack.get(ValType::I32); // get second index
 
     let var_first = var_name(&ValType::I32, index - 1);
     let var_second = var_name(&ValType::I32, index);
 
-    writeln!(out.source, "{} = {} - {};", var_first, var_first, var_second)?;
+    writeln!(
+        out.source,
+        "{} = {} - {};",
+        var_first, var_first, var_second
+    )?;
 
     Ok(())
 }
 
-fn print_i64sub(
-    stack: &mut TypeStack,
-    out: &mut Output<impl Write, impl Write>,
-) -> Result<()> {
+fn print_i64sub(stack: &mut TypeStack, out: &mut Output<impl Write, impl Write>) -> Result<()> {
     stack.dec(ValType::I64); // pop second
     let index = stack.get(ValType::I64); // get second index
 
     let var_first = var_name(&ValType::I64, index - 1);
     let var_second = var_name(&ValType::I64, index);
 
-    writeln!(out.source, "{} = {} - {};", var_first, var_first, var_second)?;
+    writeln!(
+        out.source,
+        "{} = {} - {};",
+        var_first, var_first, var_second
+    )?;
 
     Ok(())
 }
 
 /* EXPORTS */
+#[allow(clippy::single_match)] // Temporary until more features are supported
 fn print_exports(
     exports: &[ExportCopy],
     validator: &Validator,
