@@ -1,11 +1,21 @@
 use std::{
-    ffi::OsString,
+    ffi::{OsStr, OsString},
     os::unix::ffi::OsStringExt,
     path::PathBuf,
     process::{Command, Output},
 };
 
-fn command(cmd: &str, args: &[&str]) -> Output {
+fn select(choices: &[&str]) -> PathBuf {
+    for bin in choices {
+        if let Ok(path) = which::which(bin) {
+            return path;
+        }
+    }
+
+    panic!("failed to find llvm-config")
+}
+
+fn command<P: AsRef<OsStr>>(cmd: P, args: &[&str]) -> Output {
     Command::new(cmd).args(args).output().unwrap()
 }
 
@@ -40,7 +50,9 @@ fn quote(value: &str) -> String {
 fn main() {
     println!("cargo::rerun-if-changed=src/jit.cpp");
 
-    let llvm_dir = output_to_path(command("llvm-config", &["--prefix"]));
+    let llvm_config_bin = select(&["llvm-config-22", "llvm-config-23", "llvm-config"]);
+
+    let llvm_dir = output_to_path(command(&llvm_config_bin, &["--prefix"]));
     let (resource_dir, include_paths) = clang_configuration();
     let include_initializer = format!(
         "{{ {} }}",
