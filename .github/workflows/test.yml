@@ -36,6 +36,8 @@ jobs:
     runs-on: ubuntu-26.04
     steps:
       - uses: actions/checkout@v6
+        with:
+          submodules: true
       - name: Install Rust
         run: rustup update stable
       - name: Install LLVM 22
@@ -49,6 +51,10 @@ jobs:
             libclang-22-dev \
             libclang-cpp22-dev
       - name: Build wasm2c
-        run: RUSTFLAGS="-Dwarnings" cargo +stable build --locked --all
+        run: RUSTFLAGS="-Dwarnings" cargo build --locked --all
       - name: Test wasm2c
-        run: RUSTFLAGS="-Dwarnings" cargo +stable test --locked --all -- --no-capture
+        run: RUSTFLAGS="-Dwarnings" cargo test --locked --all -- --no-capture
+      - name: Run wast tests
+        run: |
+          RUSTFLAGS="-Dwarnings" cargo run --locked -p test-runner -- --update > /dev/null
+          git diff --exit-code -- test-runner/passing.txt

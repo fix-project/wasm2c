@@ -7,14 +7,14 @@ unsafe extern "C" {
         source_length: usize,
         header: *const c_char,
         header_length: usize,
-        result: *mut c_int,
+        passed: *mut bool,
     ) -> c_int;
 }
 
-pub fn run(source: &str, header: &str) -> Result<i32> {
+// Compiles and runs C++ that sets one entry of `passed` per assertion with `run(bool* passed)`
+pub fn run(source: &str, header: &str, passed: &mut [bool]) -> Result<()> {
     let c_source = CString::new(source)?;
     let c_header = CString::new(header)?;
-    let mut result = 0;
 
     let err = unsafe {
         run_program(
@@ -22,7 +22,7 @@ pub fn run(source: &str, header: &str) -> Result<i32> {
             source.len(),
             c_header.as_ptr(),
             header.len(),
-            &mut result as *mut c_int,
+            passed.as_mut_ptr(),
         )
     };
 
@@ -30,5 +30,5 @@ pub fn run(source: &str, header: &str) -> Result<i32> {
         bail!("failed to run C++ source code");
     }
 
-    Ok(result)
+    Ok(())
 }
