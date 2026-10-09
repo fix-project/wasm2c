@@ -1,9 +1,10 @@
 use crate::jit;
-use anyhow::{Result, ensure};
+use anyhow::{Result, bail};
 use buffer_redux::{BufReader, BufWriter};
 use clio::ClioPath;
 use convert_case::ccase;
 use std::io::Write;
+use std::panic;
 use wasm2c::{codegen, config::*};
 use wast::core::{WastArgCore, WastRetCore};
 use wast::parser::{self, ParseBuffer};
@@ -13,10 +14,86 @@ static W2CC: &'static str = "w2cc_";
 
 #[test]
 fn seven() -> Result<()> {
-    run_test(include_str!("../samples/seven.wast"))
+    let outcomes = run_test(include_str!("../samples/seven.wast"))?;
+    anyhow::ensure!(
+        outcomes.len() == 2 && outcomes.iter().all(|&(_, passed)| passed),
+        "seven.wast failed"
+    );
+    Ok(())
 }
 
-fn run_test(text: &str) -> Result<()> {
+// Line number and column number
+pub type Location = (usize, usize);
+
+// Runs every directive in a .wast file
+pub fn run_test(text: &str) -> Result<Vec<(Location, bool)>> {
+    let buffer = ParseBuffer::new(text)?;
+    let wast = parser::parse::<Wast>(&buffer)?;
+    let mut outcomes = Vec::new();
+    let mut modules: Vec<Module> = Vec::new();
+
+    for directive in wast.directives {
+        let (line, column) = directive.span().linecol_in(text);
+        let location = (line + 1, column + 1);
+        match directive {
+            WastDirective::Module(mut module) => modules.push(Module {
+                location,
+                wasm: module.encode().map_err(Into::into),
+                asserts: Vec::new(),
+                blocked: false,
+            }),
+            WastDirective::AssertReturn { exec, results, .. } => {
+                // Check previous module
+                match (modules.last_mut(), parse_assert_return(exec, results)) {
+                    (Some(module), Ok(command)) if !module.blocked => {
+                        module.asserts.push((location, command));
+                    }
+                    (Some(module), _) => {
+                        module.blocked = true;
+                        outcomes.push((location, false));
+                    }
+                    (None, _) => outcomes.push((location, false)),
+                }
+            }
+            _ => {
+                if let Some(module) = modules.last_mut() {
+                    module.blocked = true;
+                }
+                outcomes.push((location, false));
+            }
+        }
+    }
+
+    for module in modules {
+        outcomes.extend(run_module(module));
+    }
+    outcomes.sort_by_key(|&(location, _)| location);
+    Ok(outcomes)
+}
+
+struct Module {
+    location: Location,
+    wasm: Result<Vec<u8>>,
+    asserts: Vec<(Location, Command)>,
+    blocked: bool,
+}
+
+fn run_module(module: Module) -> Vec<(Location, bool)> {
+    let passed = module.wasm.ok().and_then(|wasm| {
+        panic::catch_unwind(|| run_jit(&wasm, &module.asserts))
+            .ok()?
+            .ok()
+    });
+
+    let mut outcomes = vec![(module.location, passed.is_some())];
+    let passed = passed.unwrap_or_else(|| vec![false; module.asserts.len()]);
+    for ((location, _), passed) in module.asserts.iter().zip(passed) {
+        outcomes.push((*location, passed));
+    }
+    outcomes
+}
+
+fn run_jit(wasm: &[u8], asserts: &[(Location, Command)]) -> Result<Vec<bool>> {
     let mut header = Vec::new();
     let mut source = Vec::new();
 
@@ -26,69 +103,60 @@ fn run_test(text: &str) -> Result<()> {
             source: BufWriter::new(&mut source),
             name: String::from("input"),
         };
-        let commands = parse_wast(&text, &mut output)?;
-        print_test(commands, &mut output)?;
+        run_wasm2cc(wasm, &mut output)?;
+        print_test(asserts, &mut output)?;
         output.header.flush()?;
         output.source.flush()?;
     }
 
-    let status = jit::run(
+    let mut passed = vec![false; asserts.len()];
+    jit::run(
         &String::from_utf8_lossy(&source),
         &String::from_utf8_lossy(&header),
+        &mut passed,
     )?;
-
-    ensure!(status == 0, "test failed to run");
-    Ok(())
+    Ok(passed)
 }
 
 /* CODEGEN */
-fn print_test(commands: Vec<Command>, out: &mut Output<impl Write, impl Write>) -> Result<()> {
+fn print_test(
+    asserts: &[(Location, Command)],
+    out: &mut Output<impl Write, impl Write>,
+) -> Result<()> {
     print_includes(out)?;
-    print_module_includes(&commands, out)?;
-
-    writeln!(out.source, "bool failed = false;")?;
     print_asserts(out)?;
-    print_main(&commands, out)?;
+    print_run(asserts, out)?;
     Ok(())
 }
 
-fn print_main(commands: &Vec<Command>, out: &mut Output<impl Write, impl Write>) -> Result<()> {
-    writeln!(out.source, "int main() {{")?;
+// called with one bool per assertion
+fn print_run(
+    asserts: &[(Location, Command)],
+    out: &mut Output<impl Write, impl Write>,
+) -> Result<()> {
+    writeln!(out.source, "extern \"C\" void run(bool* passed) {{")?;
 
-    let mut curr_module = &String::new();
+    let module = out.name.clone();
+    print_construct_module(&module, out)?;
 
-    for cmd in commands {
+    for (i, (_, cmd)) in asserts.iter().enumerate() {
         match cmd {
-            Command::Module { name } => {
-                print_construct_module(name, out)?;
-                curr_module = name;
-            }
             Command::AssertReturn {
                 func,
                 args,
                 expected,
             } => {
-                print_assert_return(func, args, expected, curr_module, out)?;
+                print_assert_return(i, func, args, expected, &module, out)?;
             }
         }
     }
-    print_status(out)?;
     writeln!(out.source, "}}")?;
 
     Ok(())
 }
 
-fn print_status(out: &mut Output<impl Write, impl Write>) -> Result<()> {
-    writeln!(
-        out.source,
-        "if (!failed) std::cout << \"all tests passed\\n\";"
-    )?;
-    writeln!(out.source, "return failed;")?;
-    Ok(())
-}
-
 fn print_includes(out: &mut Output<impl Write, impl Write>) -> Result<()> {
-    let includes = ["<type_traits>", "<iostream>"];
+    let includes = ["<type_traits>"];
     for inc in includes {
         writeln!(out.source, "#include {}", inc)?;
     }
@@ -96,6 +164,7 @@ fn print_includes(out: &mut Output<impl Write, impl Write>) -> Result<()> {
 }
 
 fn print_assert_return(
+    index: usize,
     func: &String,
     args: &Vec<Value>,
     expect: &Vec<Value>,
@@ -107,9 +176,11 @@ fn print_assert_return(
     let exp_type = print_expect(expect, out)?;
     print_result(func, args, curr_module, expect.is_empty(), out)?;
 
-    if !expect.is_empty() {
+    if expect.is_empty() {
+        writeln!(out.source, "passed[{index}] = true;")?;
+    } else {
         writeln!(out.source, "ASSERT_TYPE(result, {});", exp_type)?;
-        writeln!(out.source, "ASSERT_VALUE(result, expect);")?;
+        writeln!(out.source, "passed[{index}] = result == expect;")?;
     }
 
     writeln!(out.source, "}}")?;
@@ -172,6 +243,12 @@ fn print_result(
     }
 
     call_str += ")";
+    if is_void {
+        writeln!(
+            out.source,
+            "static_assert(std::is_void_v<decltype({call_str})>);"
+        )?;
+    }
     writeln!(out.source, "{};\n", call_str)?;
 
     Ok(())
@@ -182,38 +259,11 @@ fn print_construct_module(name: &String, out: &mut Output<impl Write, impl Write
     Ok(())
 }
 
-fn print_module_includes(
-    commands: &Vec<Command>,
-    out: &mut Output<impl Write, impl Write>,
-) -> Result<()> {
-    for cmd in commands {
-        match cmd {
-            Command::Module { name } => {
-                writeln!(out.source, "#include \"{}.hh\"", name)?;
-            }
-            _ => {}
-        }
-    }
-    writeln!(out.source)?;
-    Ok(())
-}
-
 fn print_asserts(out: &mut Output<impl Write, impl Write>) -> Result<()> {
     writeln!(
         out.source,
         "#define ASSERT_TYPE(var, T) \\\
     \n    static_assert(std::is_same<decltype(var), T>::value, #var \" must be \" #T)"
-    )?;
-
-    writeln!(
-        out.source,
-        "#define ASSERT_VALUE(result, expected)                \\\
-    \n    do {{                                              \\\
-    \n        if ((result) != (expected)) {{                 \\\
-    \n            std::cerr << \"assertion failed: \" << result << \" != \" << expected << std::endl;       \\\
-    \n            failed = true;                            \\\
-    \n        }}                                            \\\
-    \n    }} while (0)"
     )?;
 
     writeln!(out.source)?;
@@ -223,10 +273,6 @@ fn print_asserts(out: &mut Output<impl Write, impl Write>) -> Result<()> {
 
 /* SECTION 2: PARSE WAST */
 enum Command {
-    Module {
-        name: String,
-    },
-
     AssertReturn {
         func: String,
         args: Vec<Value>,
@@ -240,47 +286,12 @@ enum Value {
     // F32, F64
 }
 
-fn parse_wast(text: &str, out: &mut Output<impl Write, impl Write>) -> Result<Vec<Command>> {
-    let buf = ParseBuffer::new(text)?;
-    let wast = parser::parse::<Wast>(&buf)?;
-
-    let mut commands = Vec::new();
-    // let mut curr_module: &Command;
-
+fn run_wasm2cc(bytes: &[u8], out: &mut Output<impl Write, impl Write>) -> Result<()> {
     // Must match Output::name: codegen qualifies member definitions with the
     // output name but names the class after the module name, and the JIT
     // compiles the pair as input.cc / input.hh.
-    let module_name = out.name.clone();
-
-    for dir in wast.directives {
-        let command = match dir {
-            WastDirective::Module(mut module) => {
-                let bytes = module.encode()?;
-                let module = run_wasm2cc(&bytes, &module_name, out)?;
-                // curr_module = &module;
-                module
-            }
-            WastDirective::AssertReturn { exec, results, .. } => {
-                parse_assert_return(exec, results)?
-            }
-            _ => {
-                todo!()
-            }
-        };
-        commands.push(command);
-    }
-    Ok(commands)
-}
-
-/* bytes of the module -> paths of .cc and .hh */
-fn run_wasm2cc(
-    bytes: &[u8],
-    name: &str,
-    out: &mut Output<impl Write, impl Write>,
-) -> Result<Command> {
-    // let tmp_dir = tempdir()?;
     let mut config = Config {
-        name: name.to_string(), // TODO: change later idk
+        name: out.name.clone(),
         dest_dir: ClioPath::default(),
         reader: BufReader::new(bytes),
     };
@@ -288,23 +299,25 @@ fn run_wasm2cc(
     codegen::print_includes(out)?;
     codegen::print_typedefs(out)?;
     codegen::print_program(&mut config, out)?;
-
-    Ok(Command::Module { name: config.name })
+    Ok(())
 }
 
 fn parse_assert_return(exec: WastExecute, results: Vec<WastRet>) -> Result<Command> {
     let (func, args) = match exec {
         WastExecute::Invoke(invoke) => {
+            if invoke.module.is_some() {
+                bail!("named module invocations are not supported yet");
+            }
             let func = invoke.name.to_string();
-            let args = args_to_values(invoke.args);
+            let args = args_to_values(invoke.args)?;
             (func, args)
         }
         _ => {
-            todo!()
+            bail!("unsupported assert_return action");
         }
     };
 
-    let expected = results_to_values(results);
+    let expected = results_to_values(results)?;
 
     Ok(Command::AssertReturn {
         func,
@@ -313,7 +326,7 @@ fn parse_assert_return(exec: WastExecute, results: Vec<WastRet>) -> Result<Comma
     })
 }
 
-fn args_to_values(args: Vec<WastArg>) -> Vec<Value> {
+fn args_to_values(args: Vec<WastArg>) -> Result<Vec<Value>> {
     let mut values = Vec::new();
 
     for arg in args {
@@ -322,22 +335,22 @@ fn args_to_values(args: Vec<WastArg>) -> Vec<Value> {
                 WastArgCore::I32(val) => Value::I32(val),
                 WastArgCore::I64(val) => Value::I64(val),
                 _ => {
-                    unimplemented!()
+                    bail!("unsupported argument");
                 }
             },
             WastArg::Component(_) => {
-                unimplemented!()
+                bail!("unsupported argument");
             }
             _ => {
-                unimplemented!()
+                bail!("unsupported argument");
             }
         };
         values.push(val);
     }
-    values
+    Ok(values)
 }
 
-fn results_to_values(results: Vec<WastRet>) -> Vec<Value> {
+fn results_to_values(results: Vec<WastRet>) -> Result<Vec<Value>> {
     let mut values = Vec::new();
 
     for res in results {
@@ -346,20 +359,20 @@ fn results_to_values(results: Vec<WastRet>) -> Vec<Value> {
                 WastRetCore::I32(val) => Value::I32(val),
                 WastRetCore::I64(val) => Value::I64(val),
                 _ => {
-                    unimplemented!()
+                    bail!("unsupported result");
                 }
             },
             WastRet::Component(_) => {
-                unimplemented!()
+                bail!("unsupported result");
             }
             _ => {
-                unimplemented!()
+                bail!("unsupported result");
             }
         };
         values.push(val);
     }
 
-    values
+    Ok(values)
 }
 
 /* SECTION 3: */
