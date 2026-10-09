@@ -52,5 +52,25 @@ jobs:
         run: RUSTFLAGS="-Dwarnings" cargo build --locked --all
       - name: Test wasm2c
         run: RUSTFLAGS="-Dwarnings" cargo test --locked --all -- --no-capture
-      - name: Run wast tests
-        run: RUSTFLAGS="-Dwarnings" cargo run --locked -p test-runner
+      - name: Test wast
+        run: RUSTFLAGS="-Dwarnings" cargo run --locked -p test-runner | tee "$RUNNER_TEMP/wast-proposed.txt"
+      - uses: actions/checkout@v6
+        if: github.event_name == 'pull_request'
+        with:
+          ref: ${{ github.event.pull_request.base.sha }}
+          path: .ci-base
+      - name: Check wast regressions
+        if: github.event_name == 'pull_request'
+        working-directory: .ci-base
+        run: |
+          cargo run --locked -p test-runner | tee "$RUNNER_TEMP/wast-base.txt"
+
+          cd "$RUNNER_TEMP"
+          sed -n 's/ pass$//p' wast-base.txt | sort -u > wast-base-passes.txt
+          sed -n 's/ pass$//p' wast-proposed.txt | sort -u > wast-proposed-passes.txt
+
+          comm -23 wast-base-passes.txt wast-proposed-passes.txt > wast-regressions.txt
+          if [[ -s wast-regressions.txt ]]; then
+            cat wast-regressions.txt
+            exit 1
+          fi
