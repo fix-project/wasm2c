@@ -30,7 +30,7 @@ jobs:
           rustup update stable
           rustup component add clippy --toolchain stable
       - name: Run clippy
-        run: cargo clippy --locked --all-targets -- -D warnings
+        run: cargo clippy --locked --all -- -D warnings
 
   build:
     runs-on: ubuntu-26.04

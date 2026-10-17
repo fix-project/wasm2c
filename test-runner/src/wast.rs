@@ -10,7 +10,7 @@ use wast::core::{WastArgCore, WastRetCore};
 use wast::parser::{self, ParseBuffer};
 use wast::{Wast, WastArg, WastDirective, WastExecute, WastRet};
 
-static W2CC: &'static str = "w2cc_";
+static W2CC: &str = "w2cc_";
 
 // Line number and column number
 pub type Location = (usize, usize);
@@ -157,8 +157,8 @@ fn print_includes(out: &mut Output<impl Write, impl Write>) -> Result<()> {
 fn print_assert_return(
     index: usize,
     func: &String,
-    args: &Vec<Value>,
-    expect: &Vec<Value>,
+    args: &[Value],
+    expect: &[Value],
     curr_module: &String,
     out: &mut Output<impl Write, impl Write>,
 ) -> Result<()> {
@@ -178,7 +178,7 @@ fn print_assert_return(
     Ok(())
 }
 
-fn print_expect(expect: &Vec<Value>, out: &mut Output<impl Write, impl Write>) -> Result<String> {
+fn print_expect(expect: &[Value], out: &mut Output<impl Write, impl Write>) -> Result<String> {
     let mut type_str = String::new();
     let mut val_str = String::new();
 
@@ -186,7 +186,7 @@ fn print_expect(expect: &Vec<Value>, out: &mut Output<impl Write, impl Write>) -
         0 => "".to_string(),
         1 => {
             type_str = cc_type(&expect[0]);
-            format!("{} expect{{{}}}", &type_str, cc_value(&expect[0]))
+            format!("{} expect{{{}}}", type_str, cc_value(&expect[0]))
         }
         _ => {
             type_str += "std::tuple<";
@@ -209,7 +209,7 @@ fn print_expect(expect: &Vec<Value>, out: &mut Output<impl Write, impl Write>) -
 
 fn print_result(
     func: &String,
-    args: &Vec<Value>,
+    args: &[Value],
     curr_module: &String,
     is_void: bool,
     out: &mut Output<impl Write, impl Write>,
@@ -222,11 +222,11 @@ fn print_result(
 
     call_str += &format!("{curr_module}.{W2CC}{func}(");
 
-    for i in 0..args.len() {
+    for (i, arg) in args.iter().enumerate() {
         if i > 0 {
             call_str += ", ";
         }
-        let arg_str = match args[i] {
+        let arg_str = match arg {
             Value::I32(val) => val.to_string(),
             Value::I64(val) => val.to_string(),
         };
