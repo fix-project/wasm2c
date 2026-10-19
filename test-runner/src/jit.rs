@@ -7,14 +7,16 @@ unsafe extern "C" {
         source_length: usize,
         header: *const c_char,
         header_length: usize,
-        passed: *mut bool,
+        passed: *mut u32,
     ) -> c_int;
 }
 
-// Compiles and runs C++ that sets one entry of `passed` per assertion with `run(bool* passed)`
-pub fn run(source: &str, header: &str, passed: &mut [bool]) -> Result<()> {
+// Compiles and runs C++ that returns a uint32_t of the number of successful commands
+pub fn run(source: &[u8], header: &[u8]) -> Result<u32> {
     let c_source = CString::new(source)?;
     let c_header = CString::new(header)?;
+
+    let mut num_successes: u32 = 0;
 
     let err = unsafe {
         run_program(
@@ -22,7 +24,7 @@ pub fn run(source: &str, header: &str, passed: &mut [bool]) -> Result<()> {
             source.len(),
             c_header.as_ptr(),
             header.len(),
-            passed.as_mut_ptr(),
+            std::ptr::addr_of_mut!(num_successes),
         )
     };
 
@@ -30,5 +32,5 @@ pub fn run(source: &str, header: &str, passed: &mut [bool]) -> Result<()> {
         bail!("failed to run C++ source code");
     }
 
-    Ok(())
+    Ok(num_successes)
 }

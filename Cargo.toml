@@ -4,12 +4,17 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
-anyhow = "1.0.103"
-buffer-redux = "1.1.0"
-clap = { version = "4.6.4", features = ["derive"] }
+anyhow = "1.0.104"
+bumpalo = "3.20.3"
+clap = { version = "4.6.7", features = ["derive"] }
 clio = { version = "0.3.5", features = ["clap-parse"] }
-convert_case = "0.11.0"
-wasmparser = "0.253.0"
+convert_case = "0.12.0"
+indoc = "2.0.8"
+itertools = "0.15.0"
+smallvec = "1.16.3"
+wasm-tools = "1.262.0"
+wasmparser = "0.262.0"
+wast = "262.0.0"
 
 [workspace]
 members = ["test-runner"]
