@@ -32,7 +32,7 @@ using namespace llvm;
 
 extern "C" int run_program(const char *source, std::size_t source_length,
                            const char *header, std::size_t header_length,
-                           bool *passed) noexcept {
+                           unsigned int *num_successes) noexcept {
     // The asm parser is required too: the C++ standard library headers pull in
     // inline asm, which the JIT cannot lower without it.
     if (InitializeNativeTarget() || InitializeNativeTargetAsmPrinter() ||
@@ -178,7 +178,7 @@ extern "C" int run_program(const char *source, std::size_t source_length,
 
     int status = 0;
     try {
-        run_address->toPtr<void (*)(bool *)>()(passed);
+      *num_successes = run_address->toPtr<unsigned int (*)()>()();
     } catch (...) {
         errs() << "The C++ program threw an exception\n";
         status = 1;

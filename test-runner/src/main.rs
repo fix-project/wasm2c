@@ -1,91 +1,59 @@
 mod jit;
-mod wast;
 
+use crate::jit::run;
 use anyhow::{Result, ensure};
 use clap::Parser;
 use clio::{ClioPath, has_extension};
-use std::collections::BTreeSet;
-use std::fmt::Write;
-use std::{fs, panic};
-
-const TESTS: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/tests");
-const PASSING: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/passing.txt");
+use std::fs;
+use wasm2c::{OutputSpec, wast2c};
 
 #[derive(Parser)]
 struct Args {
     // Argument passing in path to a directory/file
     #[arg(value_parser = clap::value_parser!(ClioPath).exists())]
-    path: Option<ClioPath>,
-    // Argument updating passing.txt with pasing directives
-    #[arg(long, conflicts_with = "path")]
-    update: bool,
+    path: ClioPath,
 }
 
 fn main() -> Result<()> {
     let args = Args::parse();
-    // Entire test suite is being run if no path is passed
-    let full_suite = args.path.is_none();
-    let path = match args.path {
-        Some(path) => path,
-        None => ClioPath::new(TESTS)?,
-    };
+
     // Run every file with .wast extension as test
-    let mut files = path.files(has_extension("wast"))?;
-    if full_suite {
-        let spec = std::path::Path::new(TESTS).join("spec");
-        // Filter out non-core tests
-        files.retain(|file| !file.starts_with(&spec) || file.parent() == Some(spec.as_path()));
-        ensure!(
-            files.iter().any(|file| file.starts_with(&spec)),
-            "spec tests missing. run `git submodule update --init`"
-        );
-    }
+    let mut files = args.path.files(has_extension("wast"))?;
     files.sort_by(|a, b| a.path().cmp(b.path()));
     ensure!(!files.is_empty(), "no .wast files found");
 
-    let mut results = String::new();
-    let mut passing = BTreeSet::new();
     for file in &files {
-        let name = file.strip_prefix(TESTS).unwrap_or(file.path()).display();
-        let text = fs::read_to_string(file.path())?;
-        match panic::catch_unwind(|| wast::run_test(&text)) {
-            Ok(Ok(outcomes)) => {
-                for ((line, column), passed) in outcomes {
-                    let id = format!("{name}:line {line}:column {column}");
-                    let status = if passed { "pass" } else { "fail" };
-                    writeln!(results, "{id} -- {status}")?;
-                    if passed {
-                        passing.insert(id);
-                    }
-                }
+        // TODO: use rayon to make parallel
+        let script = fs::read_to_string(file.path())?;
+
+        let mut header = Vec::new();
+        let mut body = Vec::new();
+
+        let mut output = OutputSpec::Split {
+            hh_include: String::from("input.hh"),
+            hh: &mut header,
+            cc: &mut body,
+        };
+
+        let name = file
+            .path()
+            .file_name()
+            .unwrap_or_default()
+            .to_string_lossy();
+
+        match wast2c(&script, &mut output) {
+            Ok(num_directives) => {
+                eprint!("Running {name}... ");
+                let num_successes = run(&body, &header)?;
+                eprintln!("done.");
+
+                println!("{name}: {num_successes}/{num_directives} tests passed.",);
             }
-            _ => writeln!(results, "{name} error")?,
+            Err(e) => {
+                println!("{name} error: {e}.",);
+            }
         }
     }
 
-    ensure!(!results.is_empty(), "no WAST directives");
-    print!("{results}");
-
-    if full_suite {
-        let expected = fs::read_to_string(PASSING)?;
-        let regressions: Vec<_> = expected
-            .lines()
-            .filter(|id| !passing.contains(*id))
-            .collect();
-        ensure!(
-            regressions.is_empty(),
-            "previously passing directives failed:\n{}",
-            regressions.join("\n")
-        );
-
-        // Update passing.txt
-        if args.update {
-            let mut updated = String::new();
-            for id in passing {
-                writeln!(updated, "{id}")?;
-            }
-            fs::write(PASSING, updated)?;
-        }
-    }
     Ok(())
 }
