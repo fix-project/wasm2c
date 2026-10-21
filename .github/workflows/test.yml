@@ -29,6 +29,16 @@ jobs:
         run: |
           rustup update stable
           rustup component add clippy --toolchain stable
+      - name: Install LLVM 22
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            build-essential \
+            llvm-22 \
+            llvm-22-dev \
+            clang-22 \
+            libclang-22-dev \
+            libclang-cpp22-dev
       - name: Run clippy
         run: cargo clippy --locked --all -- -D warnings
 
@@ -56,5 +66,5 @@ jobs:
         run: RUSTFLAGS="-Dwarnings" cargo test --locked --all -- --no-capture
       - name: Run wast tests
         run: |
-          RUSTFLAGS="-Dwarnings" cargo run --locked -p test-runner ./test-runner/tests/custom_tests > test-runner/passing.txt
+          RUSTFLAGS="-Dwarnings" cargo run --locked -p test-runner ./test-runner/tests/custom_tests | tee test-runner/passing.txt
           git diff --exit-code -- test-runner/passing.txt
