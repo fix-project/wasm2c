@@ -66,5 +66,5 @@ jobs:
         run: RUSTFLAGS="-Dwarnings" cargo test --locked --all -- --no-capture
       - name: Run wast tests
         run: |
-          RUSTFLAGS="-Dwarnings" cargo run --locked -p test-runner ./test-runner/tests/custom_tests | tee test-runner/passing.txt
+          RUSTFLAGS="-Dwarnings" cargo run --locked -p test-runner ./test-runner/tests | tee test-runner/passing.txt
           git diff --exit-code -- test-runner/passing.txt

@@ -35,18 +35,24 @@ fn main() -> Result<()> {
             cc: &mut body,
         };
 
-        let num_directives = wast2c(&script, &mut output)?;
-        let num_successes = run(&body, &header)?;
+        let name = file
+            .path()
+            .file_name()
+            .unwrap_or_default()
+            .to_string_lossy();
 
-        println!(
-            "{}: {num_successes}/{num_directives} tests passed.",
-            file.path()
-                .file_name()
-                .unwrap_or_default()
-                .to_string_lossy()
-        );
+        match wast2c(&script, &mut output) {
+            Ok(num_directives) => {
+                eprint!("Running {name}... ");
+                let num_successes = run(&body, &header)?;
+                eprintln!("done.");
 
-        // TODO: run tests
+                println!("{name}: {num_successes}/{num_directives} tests passed.",);
+            }
+            Err(e) => {
+                println!("{name} error: {e}.",);
+            }
+        }
     }
 
     Ok(())

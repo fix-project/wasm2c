@@ -6,8 +6,8 @@ use itertools::Itertools;
 use std::{io::Write, mem};
 use wasmparser::{
     Export, ExternalKind, FuncToValidate, FuncType, FuncValidator, FuncValidatorAllocations,
-    FunctionBody, Parser, Payload, ValType, ValidPayload, Validator, ValidatorResources,
-    WasmModuleResources,
+    FunctionBody, Import, Imports, Parser, Payload, TypeRef, ValType, ValidPayload, Validator,
+    ValidatorResources, WasmModuleResources,
 };
 
 /* STRING CONSTANTS */
@@ -80,6 +80,7 @@ fn print_module_declaration<'a>(
     let export_names = Bump::new();
     let mut exports = Vec::new();
     let mut funcs = Vec::new();
+    let mut num_func_imports = 0;
 
     for payload in Parser::new(0).parse_all(wasm) {
         let payload = payload?;
@@ -99,6 +100,22 @@ fn print_module_declaration<'a>(
                             exports.push(Export { name, ..export });
                         }
                     }
+                    Payload::ImportSection(reader) => {
+                        for import in reader {
+                            match import? {
+                                Imports::Single(
+                                    _,
+                                    Import {
+                                        ty: TypeRef::Func { .. },
+                                        ..
+                                    },
+                                ) => num_func_imports += 1,
+                                Imports::Single(_, _) => {} // TODO: other kinds of imports,
+                                Imports::Compact1 { .. } => todo!(),
+                                Imports::Compact2 { .. } => todo!(),
+                            }
+                        }
+                    }
                     Payload::CustomSection(_) => {
                         // reader => name info
                     }
@@ -116,7 +133,7 @@ fn print_module_declaration<'a>(
     for Export { name, kind, index } in exports {
         match kind {
             ExternalKind::Func => {
-                let (f, _body) = &funcs[index as usize];
+                let (f, _body) = &funcs[index as usize - num_func_imports];
                 print_function_signature(f, name, output)?;
                 write!(output, " {{ return {FUNC}{}(", f.index)?; // TODO: may use name
                 writeln!(

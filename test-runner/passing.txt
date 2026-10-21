@@ -1,1 +1,275 @@
 seven.wast: 2/2 tests passed.
+address.wast error: operator LocalGet unimplemented.
+align.wast error: operator I32Load8S unimplemented.
+binary-leb128.wast: 25/81 tests passed.
+binary.wast error: operator Block unimplemented.
+block.wast error: operator Block unimplemented.
+br.wast error: operator Block unimplemented.
+br_if.wast error: operator Block unimplemented.
+br_table.wast error: operator Block unimplemented.
+break-drop.wast error: operator Block unimplemented.
+call.wast error: operator F32Const unimplemented.
+call_indirect.wast error: operator F32Const unimplemented.
+comments.wast: 4/4 tests passed.
+const.wast error: operator F32Const unimplemented.
+conversions.wast error: operator LocalGet unimplemented.
+custom.wast error: operator LocalGet unimplemented.
+data.wast error: duplicate data identifier at byte offset 385.
+elem.wast error: duplicate elem identifier at byte offset 375.
+endianness.wast error: operator LocalGet unimplemented.
+exports.wast error: operator LocalGet unimplemented.
+f32.wast error: operator LocalGet unimplemented.
+f32_bitwise.wast error: operator LocalGet unimplemented.
+f32_cmp.wast error: operator LocalGet unimplemented.
+f64.wast error: operator LocalGet unimplemented.
+f64_bitwise.wast error: operator LocalGet unimplemented.
+f64_cmp.wast error: operator LocalGet unimplemented.
+fac.wast error: operator LocalGet unimplemented.
+float_exprs.wast error: operator LocalGet unimplemented.
+float_literals.wast error: operator F32Const unimplemented.
+float_memory.wast error: operator F32Load unimplemented.
+float_misc.wast error: operator LocalGet unimplemented.
+forward.wast error: operator LocalGet unimplemented.
+func.wast error: operator Unreachable unimplemented.
+func_ptrs.wast error: operator LocalGet unimplemented.
+globals.wast error: operator GlobalGet unimplemented.
+i32.wast error: operator LocalGet unimplemented.
+i64.wast error: operator LocalGet unimplemented.
+if.wast error: operator LocalGet unimplemented.
+imports.wast error: unimplemented Global.
+inline-module.wast: 1/1 tests passed.
+int_exprs.wast error: operator LocalGet unimplemented.
+int_literals.wast error: operator Return unimplemented.
+labels.wast error: operator Block unimplemented.
+left-to-right.wast error: operator I32Store unimplemented.
+linking.wast error: operator Call unimplemented.
+load.wast error: operator Block unimplemented.
+local_get.wast error: operator LocalGet unimplemented.
+local_set.wast error: operator LocalSet unimplemented.
+local_tee.wast error: operator LocalTee unimplemented.
+loop.wast error: operator Loop unimplemented.
+memory.wast error: operator MemorySize unimplemented.
+memory_grow.wast error: operator I32Load unimplemented.
+memory_redundancy.wast error: operator I32Store unimplemented.
+memory_size.wast error: operator MemorySize unimplemented.
+memory_trap.wast error: operator MemorySize unimplemented.
+names.wast error: likely-confusing unicode character found '\u{202e}'
+     --> <anon>:112:21
+      |
+  112 |   (func (export "￯​ ­⁠ ") (result i32) (i32.const 40))
+      |                     ^.
+nop.wast error: operator LocalGet unimplemented.
+binary.wast error: unexpected end-of-file (at offset 0x25).
+bulk.wast error: unexpected token, expected one of: an index, left paren, absheaptype
+     --> <anon>:8:39
+      |
+    8 |   (elem funcref (ref.func 0) (ref.null) (ref.func 1))
+      |                                       ^.
+custom.wast error: operator LocalGet unimplemented.
+data.wast: 25/45 tests passed.
+elem.wast error: unexpected token, expected one of: an index, left paren, absheaptype
+     --> <anon>:11:54
+      |
+   11 |   (elem funcref (ref.func $f) (ref.func $f) (ref.null) (ref.func $g))
+      |                                                      ^.
+imports.wast error: unimplemented Global.
+linking.wast error: operator Call unimplemented.
+memory_copy.wast error: unimplemented Memory.
+memory_fill.wast error: operator Loop unimplemented.
+memory_init.wast error: unimplemented Memory.
+table_copy.wast error: operator Nop unimplemented.
+table_init.wast error: operator TableInit unimplemented.
+binary.wast error: operator Block unimplemented.
+block.wast error: operator Block unimplemented.
+br.wast error: operator Block unimplemented.
+call.wast error: operator F32Const unimplemented.
+call_indirect.wast error: operator F32Const unimplemented.
+fac.wast error: operator LocalGet unimplemented.
+func.wast error: operator Unreachable unimplemented.
+if.wast error: operator LocalGet unimplemented.
+loop.wast error: operator Loop unimplemented.
+type.wast: 1/3 tests passed.
+globals.wast error: unknown operator or unexpected token
+     --> <anon>:14:40
+      |
+   14 |   (func (export "get-a") (result i32) (get_global $a))
+      |                                        ^.
+linking.wast error: unknown operator or unexpected token
+     --> <anon>:41:38
+      |
+   41 |   (func (export "get") (result i32) (get_global $glob))
+      |                                      ^.
+conversions.wast error: operator LocalGet unimplemented.
+binary.wast error: operator Block unimplemented.
+br_table.wast error: unexpected token, expected one of: `module`, `component`, `assert_malformed`, `assert_malformed_custom`, `assert_invalid`, `assert_invalid_custom`, `register`, `invoke`, `assert_trap`, `assert_return`, `assert_exhaustion`, `assert_unlinkable`, `assert_exception`, `assert_suspension`, `thread`, `wait`
+     --> <anon>:1484:2
+      |
+ 1484 | (assert_return_func (invoke "meet-funcref-1" (i32.const 0)))
+      |  ^.
+exports.wast error: operator LocalGet unimplemented.
+globals.wast error: unexpected token, expected one of: an index, left paren, absheaptype
+     --> <anon>:14:30
+      |
+   14 |   (global $r anyref (ref.null))
+      |                              ^.
+imports.wast error: unimplemented Global.
+linking.wast error: unexpected token, expected one of: an index, left paren, absheaptype
+     --> <anon>:97:47
+      |
+   97 |   (global (export "g-const") funcref (ref.null))
+      |                                               ^.
+memory_grow.wast error: operator I32Load unimplemented.
+ref_func.wast error: operator LocalGet unimplemented.
+ref_is_null.wast error: unexpected token, expected one of: an index, left paren, absheaptype
+     --> <anon>:17:43
+      |
+   17 |     (table.set $t2 (i32.const 1) (ref.null))
+      |                                           ^.
+ref_null.wast error: unexpected token, expected one of: an index, left paren, absheaptype
+     --> <anon>:2:52
+      |
+    2 |   (func (export "anyref") (result anyref) (ref.null))
+      |                                                    ^.
+select.wast error: unexpected token, expected one of: an index, left paren, absheaptype
+     --> <anon>:37:38
+      |
+   37 |     (select (result anyref) (ref.null) (ref.null) (local.get 0))
+      |                                      ^.
+table_fill.wast error: unexpected token, expected one of: an index, left paren, absheaptype
+     --> <anon>:42:54
+      |
+   42 | (assert_return (invoke "fill" (i32.const 9) (ref.null) (i32.const 1)))
+      |                                                      ^.
+table_get.wast error: type mismatch: invalid element type `(ref func)` for table type `anyref` (at offset 0x6c).
+table_grow.wast error: unexpected token, expected one of: an index, left paren, absheaptype
+     --> <anon>:17:54
+      |
+   17 | (assert_return (invoke "grow" (i32.const 1) (ref.null)) (i32.const 0))
+      |                                                      ^.
+table_set.wast error: unexpected token, expected one of: an index, left paren, absheaptype
+     --> <anon>:31:60
+      |
+   31 | (assert_return (invoke "set-anyref" (i32.const 0) (ref.null)))
+      |                                                            ^.
+table_size.wast error: unexpected token, expected one of: an index, left paren, absheaptype
+     --> <anon>:13:36
+      |
+   13 |     (drop (table.grow $t0 (ref.null) (local.get $sz)))
+      |                                    ^.
+unreached-invalid.wast: 0/110 tests passed.
+i32.wast error: unknown operator or unexpected token
+     --> <anon>:4:77
+      |
+    4 |   (func (export "add") (param $x i32) (param $y i32) (result i32) (i32.add (get_local $x) (get_local $y)))
+      |                                                                             ^.
+i64.wast error: unknown operator or unexpected token
+     --> <anon>:4:77
+      |
+    4 |   (func (export "add") (param $x i64) (param $y i64) (result i64) (i64.add (get_local $x) (get_local $y)))
+      |                                                                             ^.
+simd_address.wast error: operator LocalGet unimplemented.
+simd_align.wast error: unexpected SIMD opcode: 0xfd (at offset 0xfc).
+simd_bit_shift.wast error: operator LocalGet unimplemented.
+simd_bitwise.wast error: operator LocalGet unimplemented.
+simd_boolean.wast error: unknown operator or unexpected token
+     --> <anon>:4:65
+      |
+    4 |   (func (export "i8x16.any_true") (param $0 v128) (result i32) (i8x16.any_true (local.get $0)))
+      |                                                                 ^.
+simd_const.wast error: unexpected SIMD opcode: 0xfd (at offset 0x17).
+simd_conversions.wast error: unknown operator or unexpected token
+     --> <anon>:10:6
+      |
+   10 |     (i64x2.trunc_sat_f64x2_s (local.get 0)))
+      |      ^.
+simd_f32x4.wast error: unexpected token, expected one of: `module`, `component`, `assert_malformed`, `assert_malformed_custom`, `assert_invalid`, `assert_invalid_custom`, `register`, `invoke`, `assert_trap`, `assert_return`, `assert_exhaustion`, `assert_unlinkable`, `assert_exception`, `assert_suspension`, `thread`, `wait`
+     --> <anon>:102:2
+      |
+  102 | (assert_return_canonical_nan
+      |  ^.
+simd_f32x4_arith.wast error: unexpected token, expected one of: `module`, `component`, `assert_malformed`, `assert_malformed_custom`, `assert_invalid`, `assert_invalid_custom`, `register`, `invoke`, `assert_trap`, `assert_return`, `assert_exhaustion`, `assert_unlinkable`, `assert_exception`, `assert_suspension`, `thread`, `wait`
+     --> <anon>:730:2
+      |
+  730 | (assert_return_canonical_nan_f32x4 (invoke "f32x4.add" (v128.const f32x4 inf inf inf inf)
+      |  ^.
+simd_f32x4_cmp.wast error: operator LocalGet unimplemented.
+simd_f64x2.wast error: unexpected token, expected one of: `module`, `component`, `assert_malformed`, `assert_malformed_custom`, `assert_invalid`, `assert_invalid_custom`, `register`, `invoke`, `assert_trap`, `assert_return`, `assert_exhaustion`, `assert_unlinkable`, `assert_exception`, `assert_suspension`, `thread`, `wait`
+     --> <anon>:132:2
+      |
+  132 | (assert_return_canonical_nan
+      |  ^.
+simd_f64x2_arith.wast error: unexpected token, expected one of: `module`, `component`, `assert_malformed`, `assert_malformed_custom`, `assert_invalid`, `assert_invalid_custom`, `register`, `invoke`, `assert_trap`, `assert_return`, `assert_exhaustion`, `assert_unlinkable`, `assert_exception`, `assert_suspension`, `thread`, `wait`
+     --> <anon>:730:2
+      |
+  730 | (assert_return_canonical_nan_f64x2 (invoke "f64x2.add" (v128.const f64x2 inf inf)
+      |  ^.
+simd_f64x2_cmp.wast error: operator LocalGet unimplemented.
+simd_i16x8_arith.wast error: operator LocalGet unimplemented.
+simd_i16x8_cmp.wast error: operator LocalGet unimplemented.
+simd_i16x8_sat_arith.wast error: unknown operator or unexpected token
+     --> <anon>:5:74
+      |
+    5 |   (func (export "i16x8.add_saturate_s") (param v128 v128) (result v128) (i16x8.add_saturate_s (local.get 0) (local.get 1)))
+      |                                                                          ^.
+simd_i32x4_arith.wast error: operator LocalGet unimplemented.
+simd_i32x4_cmp.wast error: operator LocalGet unimplemented.
+simd_i64x2_arith.wast error: operator LocalGet unimplemented.
+simd_i8x16_arith.wast error: operator LocalGet unimplemented.
+simd_i8x16_cmp.wast error: operator LocalGet unimplemented.
+simd_i8x16_sat_arith.wast error: unknown operator or unexpected token
+     --> <anon>:5:74
+      |
+    5 |   (func (export "i8x16.add_saturate_s") (param v128 v128) (result v128) (i8x16.add_saturate_s (local.get 0) (local.get 1)))
+      |                                                                          ^.
+simd_lane.wast error: unknown operator or unexpected token
+     --> <anon>:64:6
+      |
+   64 |     (v8x16.swizzle (local.get 0) (local.get 1)))
+      |      ^.
+simd_load.wast error: unknown operator or unexpected token
+     --> <anon>:124:6
+      |
+  124 |     (v8x16.swizzle (v128.load (i32.const 0)) (v128.load offset=15 (i32.const 1)))
+      |      ^.
+simd_load_extend.wast error: unknown operator or unexpected token
+     --> <anon>:9:6
+      |
+    9 |     (i16x8.load8x8_s (local.get $0))
+      |      ^.
+simd_load_splat.wast error: unknown operator or unexpected token
+     --> <anon>:8:73
+      |
+    8 |   (func (export "v8x16.load_splat") (param $address i32) (result v128) (v8x16.load_splat (local.get $address)))
+      |                                                                         ^.
+simd_splat.wast error: unknown operator or unexpected token
+     --> <anon>:191:6
+      |
+  191 |     (v8x16.swizzle (i8x16.splat (local.get 0)) (i8x16.splat (local.get 1))))
+      |      ^.
+simd_store.wast error: unexpected SIMD opcode: 0xfd (at offset 0xcb).
+atomic.wast error: unknown operator or unexpected token
+     --> <anon>:26:93
+      |
+   26 |   (func (export "i32.atomic.rmw8_u.add") (param $addr i32) (param $value i32) (result i32) (i32.atomic.rmw8_u.add (local.get $addr) (local.get $value)))
+      |                                                                                             ^.
+exports.wast error: operator LocalGet unimplemented.
+imports.wast error: unimplemented Global.
+memory.wast error: operator MemorySize unimplemented.
+return.wast error: operator Return unimplemented.
+select.wast error: operator LocalGet unimplemented.
+skip-stack-guard-page.wast error: operator LocalGet unimplemented.
+stack.wast error: operator LocalGet unimplemented.
+start.wast error: operator I32Load8U unimplemented.
+store.wast error: operator Block unimplemented.
+switch.wast error: operator LocalSet unimplemented.
+token.wast: 0/2 tests passed.
+traps.wast error: operator LocalGet unimplemented.
+type.wast: 1/5 tests passed.
+typecheck.wast: 0/164 tests passed.
+unreachable.wast error: operator Unreachable unimplemented.
+unreached-invalid.wast: 0/111 tests passed.
+unwind.wast error: operator Unreachable unimplemented.
+utf8-custom-section-id.wast: 0/176 tests passed.
+utf8-import-field.wast: 0/176 tests passed.
+utf8-import-module.wast: 0/176 tests passed.
+utf8-invalid-encoding.wast: 0/176 tests passed.
