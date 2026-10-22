@@ -111,8 +111,9 @@ fn print_module_declaration<'a>(
                                     },
                                 ) => num_func_imports += 1,
                                 Imports::Single(_, _) => {} // TODO: other kinds of imports,
-                                Imports::Compact1 { .. } => todo!(),
-                                Imports::Compact2 { .. } => todo!(),
+                                Imports::Compact1 { .. } | Imports::Compact2 { .. } => {
+                                    bail!("unimplemented: compact imports")
+                                }
                             }
                         }
                     }
@@ -133,7 +134,10 @@ fn print_module_declaration<'a>(
     for Export { name, kind, index } in exports {
         match kind {
             ExternalKind::Func => {
-                let (f, _body) = &funcs[index as usize - num_func_imports];
+                if index < num_func_imports {
+                    bail!("unimplemented: export of function import");
+                }
+                let (f, _body) = &funcs[(index - num_func_imports) as usize];
                 print_function_signature(f, name, output)?;
                 write!(output, " {{ return {FUNC}{}(", f.index)?; // TODO: may use name
                 writeln!(
@@ -156,10 +160,7 @@ fn print_module_declaration<'a>(
 }
 
 fn func_type(f: &FuncToValidate<ValidatorResources>) -> &FuncType {
-    f.resources
-        .sub_type_at(f.resources.type_index_of_function(f.ty).unwrap())
-        .unwrap()
-        .unwrap_func()
+    f.resources.sub_type_at(f.ty).unwrap().unwrap_func()
 }
 
 fn print_function_signature(
