@@ -6,7 +6,7 @@ use std::{
     io::Write,
 };
 use wasmparser::{
-    FrameKind, FrameStack, ModuleArity, ValType, VisitOperator, for_each_visit_operator,
+    BlockType, FrameKind, FrameStack, ModuleArity, ValType, VisitOperator, for_each_visit_operator,
 };
 
 struct Operand(usize);
@@ -63,6 +63,15 @@ impl<'w, W: Write> ExpressionPrinter<'w, W> {
         Ok(())
     }
 
+    fn visit_if<V: ModuleArity>(
+        &mut self,
+        validator: &V,
+        block_ty: BlockType,
+        params: &[Operand],
+    ) -> Result<()> {
+        Ok(())
+    }
+
     pub fn new(out: &'w mut W) -> Self {
         Self {
             counter: 0,
@@ -101,15 +110,28 @@ macro_rules! implement_some_operators {
     ($self:tt $arity:tt I32Add   $($t:tt)*) => { implement_some_operators!(@forward $self $arity $($t)*) };
     ($self:tt $arity:tt Drop     $($t:tt)*) => { implement_some_operators!(@forward $self $arity $($t)*) };
     ($self:tt $arity:tt End      $($t:tt)*) => { implement_some_operators!(@forward $self $arity $($t)*) };
+    ($self:tt $arity:tt If       $($t:tt)*) => { implement_some_operators!(@forward-validator $self $arity $($t)*) };
 
     (@forward $self:tt $arity:tt $({ $($arg:ident),* })? => $visit:ident) => {{
+        implement_some_operators!(@base $self $arity (|params: &[Operand]| -> Result<()> {
+            Ok(($self.stack).$visit($($($arg,)*)? params)?)
+        }))
+    }};
+
+    (@forward-validator $self:tt $arity:tt $({ $($arg:ident),* })? => $visit:ident) => {{
+        implement_some_operators!(@base $self $arity (|params: &[Operand]| -> Result<()> {
+            Ok(($self.stack).$visit(&($self.validator), $($($arg,)*)? params)?)
+        }))
+    }};
+
+    (@base $self:tt $arity:tt $call:tt) => {{
         let (num_params, num_results) = $arity.expect("arity for valid operator");
-        let params: SmallVec<[Operand;2]> = (0..num_params).map(|_| $self.pop()).collect();
-        let push_count_pre = $self.counter;
-        $self.$visit($($($arg,)*)? &params)?;
-        debug_assert_eq!($self.counter - push_count_pre, num_results as usize,
+        let params: SmallVec<[Operand;2]> = (0..num_params).map(|_| ($self.stack).pop()).collect();
+        let push_count_pre = ($self.stack).counter;
+        ($call)(&params)?;
+        debug_assert_eq!(($self.stack).counter - push_count_pre, num_results as usize,
                          "push count for {} (left) did not match arity (right)", stringify!($visit));
-	Ok(())
+    	Ok(())
     }};
 
     // Bail out gracefully on any other operator.
@@ -137,7 +159,7 @@ macro_rules! define_forward {
                 let arity = wasmparser::Operator::$op $({ $($arg: $arg.clone()),* })?
                     .operator_arity(&self.validator);
                 self.validator.$visit($($($arg.clone()),*)?)?;
-                implement_some_operators!((self.stack) arity $op $({ $($arg),* })? => $visit)
+                implement_some_operators!(self arity $op $({ $($arg),* })? => $visit)
             }
         )*
     };
