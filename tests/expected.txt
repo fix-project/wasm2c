@@ -1,0 +1,75 @@
+seven.wast: 2/2 tests passed.
+address.wast error: operator LocalGet unimplemented.
+align.wast error: operator I32Load8S unimplemented.
+binary-leb128.wast: 25/81 tests passed.
+binary.wast error: operator Block unimplemented.
+block.wast error: operator Block unimplemented.
+br.wast error: operator Block unimplemented.
+br_if.wast error: operator Block unimplemented.
+br_table.wast error: operator Block unimplemented.
+break-drop.wast error: operator Block unimplemented.
+call.wast error: operator F32Const unimplemented.
+call_indirect.wast error: operator F32Const unimplemented.
+comments.wast: 4/4 tests passed.
+const.wast error: operator F32Const unimplemented.
+conversions.wast error: operator LocalGet unimplemented.
+custom.wast error: operator LocalGet unimplemented.
+data.wast error: duplicate data identifier at byte offset 385.
+elem.wast error: duplicate elem identifier at byte offset 375.
+endianness.wast error: operator LocalGet unimplemented.
+exports.wast error: operator LocalGet unimplemented.
+f32.wast error: operator LocalGet unimplemented.
+f32_bitwise.wast error: operator LocalGet unimplemented.
+f32_cmp.wast error: operator LocalGet unimplemented.
+f64.wast error: operator LocalGet unimplemented.
+f64_bitwise.wast error: operator LocalGet unimplemented.
+f64_cmp.wast error: operator LocalGet unimplemented.
+fac.wast error: operator LocalGet unimplemented.
+float_exprs.wast error: operator LocalGet unimplemented.
+float_literals.wast error: operator F32Const unimplemented.
+float_memory.wast error: operator F32Load unimplemented.
+float_misc.wast error: operator LocalGet unimplemented.
+forward.wast error: operator LocalGet unimplemented.
+func.wast error: operator Unreachable unimplemented.
+func_ptrs.wast error: operator LocalGet unimplemented.
+globals.wast error: operator GlobalGet unimplemented.
+i32.wast error: operator LocalGet unimplemented.
+i64.wast error: operator LocalGet unimplemented.
+if.wast error: operator LocalGet unimplemented.
+imports.wast error: unimplemented Global.
+inline-module.wast: 1/1 tests passed.
+int_exprs.wast error: operator LocalGet unimplemented.
+int_literals.wast error: operator Return unimplemented.
+labels.wast error: operator Block unimplemented.
+left-to-right.wast error: operator I32Store unimplemented.
+linking.wast error: operator Call unimplemented.
+load.wast error: operator Block unimplemented.
+local_get.wast error: operator LocalGet unimplemented.
+local_set.wast error: operator LocalSet unimplemented.
+local_tee.wast error: operator LocalTee unimplemented.
+loop.wast error: operator Loop unimplemented.
+memory.wast error: operator MemorySize unimplemented.
+memory_grow.wast error: operator I32Load unimplemented.
+memory_redundancy.wast error: operator I32Store unimplemented.
+memory_size.wast error: operator MemorySize unimplemented.
+memory_trap.wast error: operator MemorySize unimplemented.
+names.wast error: operator LocalGet unimplemented.
+nop.wast error: operator LocalGet unimplemented.
+return.wast error: operator Return unimplemented.
+select.wast error: operator LocalGet unimplemented.
+skip-stack-guard-page.wast error: operator LocalGet unimplemented.
+stack.wast error: operator LocalGet unimplemented.
+start.wast error: operator I32Load8U unimplemented.
+store.wast error: operator Block unimplemented.
+switch.wast error: operator LocalSet unimplemented.
+token.wast: 0/2 tests passed.
+traps.wast error: operator LocalGet unimplemented.
+type.wast: 1/5 tests passed.
+typecheck.wast: 0/164 tests passed.
+unreachable.wast error: operator Unreachable unimplemented.
+unreached-invalid.wast: 0/111 tests passed.
+unwind.wast error: operator Unreachable unimplemented.
+utf8-custom-section-id.wast: 0/176 tests passed.
+utf8-import-field.wast: 0/176 tests passed.
+utf8-import-module.wast: 0/176 tests passed.
+utf8-invalid-encoding.wast: 0/176 tests passed.

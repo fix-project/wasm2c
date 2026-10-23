@@ -17,6 +17,6 @@ wasmparser = "0.262.0"
 wast = "262.0.0"
 
 [workspace]
-members = ["test-runner"]
+members = ["wast2c-jit"]
 default-members = ["."]
 resolver = "3"

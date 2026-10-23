@@ -5,16 +5,23 @@ use itertools::Itertools;
 use std::fmt::Display;
 use std::io::Write;
 use wast::core::{WastArgCore, WastRetCore};
+use wast::lexer::Lexer;
 use wast::parser::{self, ParseBuffer};
 use wast::{Wast, WastArg, WastDirective, WastExecute, WastInvoke, WastRet};
 
 // Convert wast script to C. Returns number of directives/commands.
-pub fn wast2c<U: Write>(text: &str, output: &mut OutputSpec<U>) -> Result<usize> {
+pub fn wast2c<U: Write>(
+    text: &str,
+    output: &mut OutputSpec<U>,
+    allow_confusing_unicode: bool,
+) -> Result<usize> {
     let OutputSpec::Split { hh_include, hh, cc } = output else {
         bail!("cannot convert wast script to header-only output");
     };
 
-    let buffer = ParseBuffer::new(text)?;
+    let mut lexer = Lexer::new(text);
+    lexer.allow_confusing_unicode(allow_confusing_unicode);
+    let buffer = ParseBuffer::new_with_lexer(lexer)?;
     let wast = parser::parse::<Wast>(&buffer)?;
     let num_directives = wast.directives.len();
     let mut module_output = OutputSpec::Unified(hh);
