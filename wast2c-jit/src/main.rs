@@ -50,7 +50,9 @@ fn main() -> Result<()> {
 
         let name = file.file_name().unwrap_or_default().to_string_lossy();
 
-        match wast2c(&script, &mut output) {
+        let allow_confusing_unicode = name == "names.wast"; // spec test with a lot of confusing Unicode
+
+        match wast2c(&script, &mut output, allow_confusing_unicode) {
             Ok(num_directives) => {
                 eprint!("Running {name}... ");
                 let num_successes = run(&body, &header)?;

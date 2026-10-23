@@ -53,11 +53,7 @@ memory_grow.wast error: operator I32Load unimplemented.
 memory_redundancy.wast error: operator I32Store unimplemented.
 memory_size.wast error: operator MemorySize unimplemented.
 memory_trap.wast error: operator MemorySize unimplemented.
-names.wast error: likely-confusing unicode character found '\u{202e}'
-     --> <anon>:112:21
-      |
-  112 |   (func (export "￯​ ­⁠ ") (result i32) (i32.const 40))
-      |                     ^.
+names.wast error: operator LocalGet unimplemented.
 nop.wast error: operator LocalGet unimplemented.
 return.wast error: operator Return unimplemented.
 select.wast error: operator LocalGet unimplemented.

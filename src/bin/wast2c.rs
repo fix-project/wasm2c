@@ -11,6 +11,13 @@ struct Args {
     dest_header: Output,
 
     dest_body: Output,
+
+    /// Whether or not "confusing unicode characters" are allowed to be present
+    /// in `*.wast` files.
+    ///
+    /// The default for this is `false`.
+    #[clap(long)]
+    allow_confusing_unicode: bool,
 }
 
 fn main() -> Result<()> {
@@ -31,6 +38,6 @@ fn main() -> Result<()> {
     let mut script = String::new();
     args.src.read_to_string(&mut script)?;
 
-    wast2c(&script, &mut output)?;
+    wast2c(&script, &mut output, args.allow_confusing_unicode)?;
     Ok(())
 }
