@@ -1335,6 +1335,7 @@ dependencies = [
  "clap",
  "clio",
  "convert_case",
+ "walkdir",
  "wasm2c",
  "wast",
 ]

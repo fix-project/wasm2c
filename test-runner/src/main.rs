@@ -3,28 +3,41 @@ mod jit;
 use crate::jit::run;
 use anyhow::{Result, ensure};
 use clap::Parser;
-use clio::{ClioPath, has_extension};
-use std::fs;
+use clio::ClioPath;
+use std::{ffi::OsStr, fs, path::PathBuf};
+use walkdir::WalkDir;
 use wasm2c::{OutputSpec, wast2c};
 
 #[derive(Parser)]
 struct Args {
-    // Argument passing in path to a directory/file
-    #[arg(value_parser = clap::value_parser!(ClioPath).exists())]
-    path: ClioPath,
+    /// One or more wast files, or directories containing wast files (will not descend directories)
+    #[arg(required = true, value_parser = clap::value_parser!(ClioPath).exists())]
+    paths: Vec<ClioPath>,
 }
 
 fn main() -> Result<()> {
     let args = Args::parse();
 
-    // Run every file with .wast extension as test
-    let mut files = args.path.files(has_extension("wast"))?;
-    files.sort_by(|a, b| a.path().cmp(b.path()));
+    // Collect all scripts
+    let mut files: Vec<PathBuf> = Vec::new();
+    for path in &args.paths {
+        for entry in WalkDir::new(path.as_os_str()).max_depth(1) {
+            let entry = entry?;
+            if entry.file_type().is_file()
+                && let Some("wast") = entry.path().extension().and_then(OsStr::to_str)
+            {
+                files.push(entry.into_path());
+            }
+        }
+    }
+
+    files.sort();
+    files.dedup();
     ensure!(!files.is_empty(), "no .wast files found");
 
     for file in &files {
         // TODO: use rayon to make parallel
-        let script = fs::read_to_string(file.path())?;
+        let script = fs::read_to_string(file)?;
 
         let mut header = Vec::new();
         let mut body = Vec::new();
@@ -35,11 +48,7 @@ fn main() -> Result<()> {
             cc: &mut body,
         };
 
-        let name = file
-            .path()
-            .file_name()
-            .unwrap_or_default()
-            .to_string_lossy();
+        let name = file.file_name().unwrap_or_default().to_string_lossy();
 
         match wast2c(&script, &mut output) {
             Ok(num_directives) => {
