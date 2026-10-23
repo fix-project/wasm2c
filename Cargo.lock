@@ -1327,20 +1327,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "test-runner"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "cc",
- "clap",
- "clio",
- "convert_case",
- "walkdir",
- "wasm2c",
- "wast",
-]
-
-[[package]]
 name = "thiserror"
 version = "1.0.69"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1660,6 +1646,18 @@ dependencies = [
  "memchr",
  "unicode-width",
  "wasm-encoder",
+]
+
+[[package]]
+name = "wast2c-jit"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "cc",
+ "clap",
+ "clio",
+ "walkdir",
+ "wasm2c",
 ]
 
 [[package]]

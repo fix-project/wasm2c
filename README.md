@@ -2,15 +2,11 @@
 
 `llvm-22` `llvm-22-dev` `clang-22` `libclang-cpp22` `libclang-cpp22-dev`
 
-
 ## Testing
 
-`cargo run -p test-runner` runs all `.wast` files in `test-runner/tests` and reports their outcomes.
+`cargo run -p wast2c-jit` runs `.wast` files and reports their outcomes.
 
-Pass a file or directory with `cargo run -p test-runner -- path/to/*`. 
-The full test suite will be run if specific path is not passed.
-
-Run full test suite with `cargo run -p test-runner -- --update` to update the "passing.txt" before submitting pull requests.
+Pass a file or directory with `cargo run -p wast2c-jit -- path/to/*`. 
 
 ## Test suite
 
