@@ -1598,7 +1598,6 @@ name = "wasm2c"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "bumpalo",
  "clap",
  "clio",
  "convert_case",
