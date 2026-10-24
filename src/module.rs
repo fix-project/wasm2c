@@ -1,13 +1,12 @@
 use crate::{OutputSpec, operators::ExpressionPrinter};
 use anyhow::{Result, bail};
-use bumpalo::Bump;
 use convert_case::ccase;
 use itertools::Itertools;
-use std::{io::Write, mem};
+use std::{collections::HashMap, io::Write, mem};
 use wasmparser::{
     Export, ExternalKind, FuncToValidate, FuncType, FuncValidator, FuncValidatorAllocations,
-    FunctionBody, Import, Imports, Parser, Payload, TypeRef, ValType, ValidPayload, Validator,
-    ValidatorResources, WasmModuleResources,
+    FunctionBody, Import, Imports, KnownCustom, Name, Parser, Payload, TypeRef, ValType,
+    ValidPayload, Validator, ValidatorResources, WasmModuleResources,
 };
 
 /* STRING CONSTANTS */
@@ -25,10 +24,15 @@ pub fn wasm2c<U: Write>(name: &str, wasm: &[u8], output: &mut OutputSpec<U>) -> 
 
     let class_name = format!("{W2CC}{}", ccase!(snake, name));
 
-    let funcs = print_module_declaration(&class_name, wasm, &mut output.header())?;
+    // PARSE ONLY
+    let (funcs, names) = read_module(wasm)?;
 
+    // PRINT class declarations (header)
+    print_module_declaration(&class_name, &funcs, &names, &mut output.header())?;
+
+    // PRINT function definitions (body)
     print_source_includes(&mut output.body())?;
-    print_function_definitions(&class_name, funcs, &mut output.body())?;
+    print_function_definitions(&class_name, funcs, &names, &mut output.body())?;
 
     Ok(class_name)
 }
@@ -69,35 +73,83 @@ fn print_typedefs(out: &mut impl Write) -> Result<()> {
     Ok(())
 }
 
-fn print_module_declaration<'a>(
-    class_name: &str,
-    wasm: &'a [u8],
-    output: &mut impl Write,
-) -> Result<Vec<(FuncToValidate<ValidatorResources>, FunctionBody<'a>)>> {
-    writeln!(output, "class {class_name} {{")?;
+// function name handling
+// a functions name can come from either being explicitly
+// named or exported under the same or a different name
+struct FuncNames<'a> {
+    exports: HashMap<u32, Vec<&'a str>>, // func index -> export names
+    names: HashMap<u32, &'a str>,        // func index -> name section $name
+}
 
+// NAMING LOGIC
+// fn           export names    behavior
+// <unnamed>    <none>          generic f{index}
+// <unnamed>    a               public a()
+// <unnamed>    a, b            public a(), public wrapper b() { return a() }
+// $a           <none>          private a()
+// $a           a, b            public a(), public wrapper b() { return a() }
+// $a           b, c            private a(), public wrappers b() c() { return a() }
+
+// TODO: name collisions if $f0 or (export "f0") matches generic format (just make it less generic?)
+// TODO: handle valid names in wat / wasm but invalid in c++
+impl FuncNames<'_> {
+    fn name(&self, index: u32) -> String {
+        if let Some(name) = self.names.get(&index) {
+            return name.to_string();
+        }
+        if let Some(export) = self.exports(index).first() {
+            return export.to_string();
+        }
+        format!("{FUNC}{index}")
+    }
+
+    // is_public = if any export is under same name
+    // this is to avoid invalid C++ syntax
+    fn is_public(&self, index: u32) -> bool {
+        let name = self.name(index);
+        self.exports(index).contains(&name.as_str())
+    }
+
+    // list of export names of function
+    fn exports(&self, index: u32) -> &[&str] {
+        match self.exports.get(&index) {
+            Some(exports) => exports,
+            None => &[],
+        }
+    }
+}
+
+type Funcs<'a> = Vec<(FuncToValidate<ValidatorResources>, FunctionBody<'a>)>;
+
+// PASS 1
+// read-only pass to collect function bodies and function names only
+fn read_module(wasm: &[u8]) -> Result<(Funcs<'_>, FuncNames<'_>)> {
     let mut validator = Validator::new();
-    let export_names = Bump::new();
-    let mut exports = Vec::new();
     let mut funcs = Vec::new();
+    let mut names = FuncNames {
+        exports: HashMap::new(),
+        names: HashMap::new(),
+    };
     let mut num_func_imports = 0;
 
     for payload in Parser::new(0).parse_all(wasm) {
         let payload = payload?;
         match validator.payload(&payload)? {
-            ValidPayload::Func(f, body) => {
-                // TODO: use func and param names from names section
-                print_function_signature(&f, &format!("{FUNC}{}", f.index), output)?;
-                writeln!(output, ";")?;
-                funcs.push((f, body));
-            }
+            ValidPayload::Func(f, body) => funcs.push((f, body)),
             ValidPayload::Ok => {
                 match payload {
                     Payload::ExportSection(reader) => {
                         for export in reader {
-                            let export = export?;
-                            let name = export_names.alloc_str(export.name);
-                            exports.push(Export { name, ..export });
+                            let Export { name, kind, index } = export?;
+                            match kind {
+                                ExternalKind::Func if index < num_func_imports => {
+                                    bail!("unimplemented: export of function import")
+                                }
+                                ExternalKind::Func => {
+                                    names.exports.entry(index).or_default().push(name)
+                                }
+                                _ => bail!("unimplemented {kind:?}"),
+                            }
                         }
                     }
                     Payload::ImportSection(reader) => {
@@ -117,8 +169,19 @@ fn print_module_declaration<'a>(
                             }
                         }
                     }
-                    Payload::CustomSection(_) => {
-                        // reader => name info
+                    Payload::CustomSection(reader) => {
+                        // custom section > name section
+                        if let KnownCustom::Name(reader) = reader.as_known() {
+                            for subsection in reader {
+                                // custom sect > name sect > function names
+                                if let Name::Function(map) = subsection? {
+                                    for naming in map {
+                                        let naming = naming?;
+                                        names.names.insert(naming.index, naming.name);
+                                    }
+                                }
+                            }
+                        }
                     }
                     _ => {}
                 }
@@ -128,35 +191,45 @@ fn print_module_declaration<'a>(
         }
     }
 
-    // print exports in public section of class
+    Ok((funcs, names))
+}
+
+fn print_module_declaration(
+    class_name: &str,
+    funcs: &Funcs,
+    names: &FuncNames,
+    output: &mut impl Write,
+) -> Result<()> {
+    writeln!(output, "class {class_name} {{")?;
+
+    // private functions
+    // i.e. not exported, or not exported under same name
+    for (f, _body) in funcs {
+        if !names.is_public(f.index) {
+            print_function_signature(f, &names.name(f.index), output)?;
+            writeln!(output, ";")?;
+        }
+    }
+
     writeln!(output, "\npublic:")?;
 
-    for Export { name, kind, index } in exports {
-        match kind {
-            ExternalKind::Func => {
-                if index < num_func_imports {
-                    bail!("unimplemented: export of function import");
-                }
-                let (f, _body) = &funcs[(index - num_func_imports) as usize];
-                print_function_signature(f, name, output)?;
-                write!(output, " {{ return {FUNC}{}(", f.index)?; // TODO: may use name
-                writeln!(
-                    output,
-                    "{}); }}",
-                    func_type(f)
-                        .params()
-                        .iter()
-                        .enumerate()
-                        .format_with(", ", |(i, _pty), f| f(&format_args!("{LOCAL}{i}")))
-                )?;
+    // public functions
+    // i.e. functions exported under their own name, wrapper for all other export names
+    for (f, _body) in funcs {
+        let name = names.name(f.index);
+        if names.is_public(f.index) {
+            print_function_signature(f, &name, output)?;
+            writeln!(output, ";")?;
+        }
+        for export in names.exports(f.index) {
+            if *export != name {
+                print_wrapper(f, export, &name, output)?;
             }
-            _ => bail!("unimplemented {kind:?}"),
         }
     }
 
     writeln!(output, "}};")?;
-
-    Ok(funcs)
+    Ok(())
 }
 
 fn func_type(f: &FuncToValidate<ValidatorResources>) -> &FuncType {
@@ -187,15 +260,38 @@ fn print_function_signature(
     Ok(())
 }
 
+// i32 wrapper(i32 l0) { return name(l0); }
+fn print_wrapper(
+    f: &FuncToValidate<ValidatorResources>,
+    wrapper_name: &str,
+    name: &str,
+    output: &mut impl Write,
+) -> Result<()> {
+    print_function_signature(f, wrapper_name, output)?;
+    write!(output, " {{ return {name}(")?;
+    writeln!(
+        output,
+        "{}); }}",
+        func_type(f)
+            .params()
+            .iter()
+            .enumerate()
+            .format_with(", ", |(i, _pty), f| f(&format_args!("{LOCAL}{i}")))
+    )?;
+    Ok(())
+}
+
 fn print_function_definitions(
     class_name: &str,
-    funcs: Vec<(FuncToValidate<ValidatorResources>, FunctionBody)>,
+    funcs: Funcs,
+    names: &FuncNames,
     output: &mut impl Write,
 ) -> Result<()> {
     let mut allocs = FuncValidatorAllocations::default();
     for (f, body) in funcs {
-        // TODO: use func and param names from names section
-        print_function_signature(&f, &format!("{class_name}::{FUNC}{}", f.index), output)?;
+        // TODO: use param names from names section
+        let name = names.name(f.index);
+        print_function_signature(&f, &format!("{class_name}::{name}"), output)?;
         writeln!(output, " {{")?;
         let mut fval = f.into_validator(mem::take(&mut allocs));
         print_function_body(&mut fval, body, output)?;
