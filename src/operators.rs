@@ -62,6 +62,7 @@ pub(crate) struct ExpressionPrinter<'w, W> {
     stack_pushes: usize,
     stack: Vec<Operand>,
     if_frames: Vec<IfFrame>,
+    #[allow(dead_code)]
     frame_depth: usize, // TODO: increment on block/etc.
     out: &'w mut W,
 }
@@ -248,13 +249,13 @@ macro_rules! implement_some_operators {
 
     (@forward $self:tt $arity:tt $({ $($arg:ident),* })? => $visit:ident) => {{
         implement_some_operators!(@base $self $visit $arity (|params: &[Operand]| -> Result<()> {
-            Ok(($self.stack).$visit($($($arg,)*)? params)?)
+            ($self.stack).$visit($($($arg,)*)? params)
         }))
     }};
 
     (@forward-validator $self:tt $arity:tt $({ $($arg:ident),* })? => $visit:ident) => {{
         implement_some_operators!(@base $self $visit $arity (|params: &[Operand]| -> Result<()> {
-            Ok(($self.stack).$visit(&($self.validator), $($($arg,)*)? params)?)
+            ($self.stack).$visit(&($self.validator), $($($arg,)*)? params)
         }))
     }};
 
