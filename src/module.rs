@@ -79,6 +79,7 @@ fn print_typedefs(out: &mut impl Write) -> Result<()> {
 struct FuncNames<'a> {
     exports: HashMap<u32, Vec<&'a str>>, // func index -> export names
     names: HashMap<u32, &'a str>,        // func index -> name section $name
+    locals: HashMap<(u32, u32), &'a str>, // func index, local index -> name section $name
 }
 
 // NAMING LOGIC
@@ -117,18 +118,32 @@ impl FuncNames<'_> {
             None => &[],
         }
     }
+
+    // param and local names (both 'local')
+    // name format "l{index}" unless explicitly given $name
+
+    // TODO: more name collisions with generic l{index}, any future stack values s{n},
+    // function names, etc
+    fn local_name(&self, func: u32, local: u32) -> String {
+        if let Some(name) = self.locals.get(&(func, local)) {
+            return name.to_string();
+        }
+        // l0, l1 etc
+        format!("{LOCAL}{local}")
+    }
 }
 
 type Funcs<'a> = Vec<(FuncToValidate<ValidatorResources>, FunctionBody<'a>)>;
 
 // PASS 1
-// read-only pass to collect function bodies and function names only
+// read-only pass to collect function bodies, function names, and local / param names only
 fn read_module(wasm: &[u8]) -> Result<(Funcs<'_>, FuncNames<'_>)> {
     let mut validator = Validator::new();
     let mut funcs = Vec::new();
     let mut names = FuncNames {
         exports: HashMap::new(),
         names: HashMap::new(),
+        locals: HashMap::new(),
     };
     let mut num_func_imports = 0;
 
@@ -173,12 +188,28 @@ fn read_module(wasm: &[u8]) -> Result<(Funcs<'_>, FuncNames<'_>)> {
                         // custom section > name section
                         if let KnownCustom::Name(reader) = reader.as_known() {
                             for subsection in reader {
-                                // custom sect > name sect > function names
-                                if let Name::Function(map) = subsection? {
-                                    for naming in map {
-                                        let naming = naming?;
-                                        names.names.insert(naming.index, naming.name);
+                                match subsection? {
+                                    // custom sect > name sect > function names
+                                    Name::Function(map) => {
+                                        for naming in map {
+                                            let naming = naming?;
+                                            names.names.insert(naming.index, naming.name);
+                                        }
                                     }
+                                    // custom sect > name sect > local names per function
+                                    Name::Local(map) => {
+                                        for func in map {
+                                            let func = func?;
+                                            for naming in func.names {
+                                                let naming = naming?;
+                                                names.locals.insert(
+                                                    (func.index, naming.index),
+                                                    naming.name,
+                                                );
+                                            }
+                                        }
+                                    }
+                                    _ => {}
                                 }
                             }
                         }
@@ -206,7 +237,7 @@ fn print_module_declaration(
     // i.e. not exported, or not exported under same name
     for (f, _body) in funcs {
         if !names.is_public(f.index) {
-            print_function_signature(f, &names.name(f.index), output)?;
+            print_function_signature(f, &names.name(f.index), names, output)?;
             writeln!(output, ";")?;
         }
     }
@@ -218,12 +249,12 @@ fn print_module_declaration(
     for (f, _body) in funcs {
         let name = names.name(f.index);
         if names.is_public(f.index) {
-            print_function_signature(f, &name, output)?;
+            print_function_signature(f, &name, names, output)?;
             writeln!(output, ";")?;
         }
         for export in names.exports(f.index) {
             if *export != name {
-                print_wrapper(f, export, &name, output)?;
+                print_wrapper(f, export, &name, names, output)?;
             }
         }
     }
@@ -239,6 +270,7 @@ fn func_type(f: &FuncToValidate<ValidatorResources>) -> &FuncType {
 fn print_function_signature(
     f: &FuncToValidate<ValidatorResources>,
     name: &str,
+    names: &FuncNames,
     output: &mut impl Write,
 ) -> Result<()> {
     let ty = func_type(f);
@@ -247,14 +279,23 @@ fn print_function_signature(
         [vty] => write!(output, "{}", vty)?,
         vtys => write!(output, "std::tuple<{}>", vtys.iter().format(", "))?,
     }
+    // function name
     write!(output, " {name}(")?;
+
+    // params
     write!(
         output,
         "{}",
         ty.params()
             .iter()
             .enumerate()
-            .format_with(", ", |(i, pty), f| f(&format_args!("{pty} {LOCAL}{i}")))
+            .format_with(", ", |(i, pty), fmt| {
+                let local_index = i as u32;
+                fmt(&format_args!(
+                    "{pty} {}",
+                    names.local_name(f.index, local_index)
+                ))
+            })
     )?;
     write!(output, ")")?;
     Ok(())
@@ -265,10 +306,15 @@ fn print_wrapper(
     f: &FuncToValidate<ValidatorResources>,
     wrapper_name: &str,
     name: &str,
+    names: &FuncNames,
     output: &mut impl Write,
 ) -> Result<()> {
-    print_function_signature(f, wrapper_name, output)?;
+    print_function_signature(f, wrapper_name, names, output)?;
+
+    // function name
     write!(output, " {{ return {name}(")?;
+
+    // pass params
     writeln!(
         output,
         "{}); }}",
@@ -276,7 +322,10 @@ fn print_wrapper(
             .params()
             .iter()
             .enumerate()
-            .format_with(", ", |(i, _pty), f| f(&format_args!("{LOCAL}{i}")))
+            .format_with(", ", |(i, _pty), fmt| {
+                let local_index = i as u32;
+                fmt(&names.local_name(f.index, local_index))
+            })
     )?;
     Ok(())
 }
@@ -289,13 +338,15 @@ fn print_function_definitions(
 ) -> Result<()> {
     let mut allocs = FuncValidatorAllocations::default();
     for (f, body) in funcs {
-        // TODO: use param names from names section
         let name = names.name(f.index);
-        print_function_signature(&f, &format!("{class_name}::{name}"), output)?;
+        print_function_signature(&f, &format!("{class_name}::{name}"), names, output)?;
         writeln!(output, " {{")?;
+
+        // functions
         let mut fval = f.into_validator(mem::take(&mut allocs));
-        print_function_body(&mut fval, body, output)?;
+        print_function_body(&mut fval, body, names, output)?;
         allocs = fval.into_allocations();
+
         writeln!(output, "}}")?;
     }
     Ok(())
@@ -304,11 +355,23 @@ fn print_function_definitions(
 fn print_function_body(
     f: &mut FuncValidator<ValidatorResources>,
     body: FunctionBody,
+    names: &FuncNames,
     output: &mut impl Write,
 ) -> Result<()> {
     let mut reader = body.get_binary_reader();
+
+    let num_params = f.len_locals();
     f.read_locals(&mut reader)?;
-    // TODO: print locals
+
+    // {} initializations to 0 (i32, i64) and 0.0 (f32, f64) (wasm defaults)
+    // TODO: maybe relying on c++ defaults is a bit hacky, and a separate map
+    // should hardcode wasm defaults
+
+    // num_params to total locals = non-param locals
+    for i in num_params..f.len_locals() {
+        let ty = f.get_local_type(i).unwrap();
+        writeln!(output, "{ty} {}{{}};", names.local_name(f.index(), i))?;
+    }
 
     let mut printer = ExpressionPrinter::new(output);
     while !reader.eof() {
