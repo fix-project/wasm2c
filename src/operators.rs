@@ -6,7 +6,8 @@ use std::{
     io::Write,
 };
 use wasmparser::{
-    FrameKind, FrameStack, ModuleArity, ValType, VisitOperator, for_each_visit_operator,
+    FrameKind, FrameStack, FuncValidator, ValType, VisitOperator, WasmModuleResources,
+    for_each_visit_operator,
 };
 
 struct Operand(usize);
@@ -72,12 +73,14 @@ impl<'w, W: Write> ExpressionPrinter<'w, W> {
         }
     }
 
-    pub(crate) fn visitor<V: ModuleArity>(
-        &mut self,
-        validator: V,
-    ) -> OperatorVisitor<'_, 'w, V, W> {
+    pub(crate) fn visitor<'a, T: WasmModuleResources>(
+        &'a mut self,
+        validator: &'a mut FuncValidator<T>,
+        offset: u64,
+    ) -> OperatorVisitor<'a, 'w, T, W> {
         OperatorVisitor {
             validator,
+            offset,
             stack: self,
         }
     }
@@ -101,15 +104,28 @@ macro_rules! implement_some_operators {
     ($self:tt $arity:tt I32Add   $($t:tt)*) => { implement_some_operators!(@forward $self $arity $($t)*) };
     ($self:tt $arity:tt Drop     $($t:tt)*) => { implement_some_operators!(@forward $self $arity $($t)*) };
     ($self:tt $arity:tt End      $($t:tt)*) => { implement_some_operators!(@forward $self $arity $($t)*) };
+    // ($self:tt $arity:tt If       $($t:tt)*) => { implement_some_operators!(@forward-validator $self $arity $($t)*) };
 
     (@forward $self:tt $arity:tt $({ $($arg:ident),* })? => $visit:ident) => {{
+        implement_some_operators!(@base $self $arity (|params: &[Operand]| -> Result<()> {
+            ($self.stack).$visit($($($arg,)*)? params)
+        }))
+    }};
+
+    (@forward-validator $self:tt $arity:tt $({ $($arg:ident),* })? => $visit:ident) => {{
+        implement_some_operators!(@base $self $arity (|params: &[Operand]| -> Result<()> {
+            ($self.stack).$visit(&*($self.validator), $($($arg,)*)? params)
+        }))
+    }};
+
+    (@base $self:tt $arity:tt $call:tt) => {{
         let (num_params, num_results) = $arity.expect("arity for valid operator");
-        let params: SmallVec<[Operand;2]> = (0..num_params).map(|_| $self.pop()).collect();
-        let push_count_pre = $self.counter;
-        $self.$visit($($($arg,)*)? &params)?;
-        debug_assert_eq!($self.counter - push_count_pre, num_results as usize,
+        let params: SmallVec<[Operand;2]> = (0..num_params).map(|_| ($self.stack).pop()).collect();
+        let push_count_pre = ($self.stack).counter;
+        ($call)(&params)?;
+        debug_assert_eq!(($self.stack).counter - push_count_pre, num_results as usize,
                          "push count for {} (left) did not match arity (right)", stringify!($visit));
-	Ok(())
+    	Ok(())
     }};
 
     // Bail out gracefully on any other operator.
@@ -117,14 +133,15 @@ macro_rules! implement_some_operators {
 						   bail!("operator {} unimplemented", stringify!($op)); }};
 }
 
-pub struct OperatorVisitor<'a, 'w, V, W> {
-    validator: V,
+pub struct OperatorVisitor<'a, 'w, T, W> {
+    validator: &'a mut FuncValidator<T>,
+    offset: u64,
     stack: &'a mut ExpressionPrinter<'w, W>,
 }
 
-impl<'w, V: FrameStack, W> FrameStack for OperatorVisitor<'_, 'w, V, W> {
+impl<'w, T: WasmModuleResources, W> FrameStack for OperatorVisitor<'_, 'w, T, W> {
     fn current_frame(&self) -> Option<FrameKind> {
-        self.validator.current_frame()
+        self.validator.get_control_frame(0).map(|frame| frame.kind)
     }
 }
 
@@ -133,19 +150,19 @@ macro_rules! define_forward {
     ($( @$proposal:ident $op:ident $({ $($arg:ident: $argty:ty),* })? => $visit:ident ($($ann:tt)*) )*) => {
         $(
             fn $visit(&mut self $($(, $arg: $argty)*)?) -> Result<()> {
+                let operator = wasmparser::Operator::$op $({ $($arg: $arg.clone()),* })?;
                 // Compute the arity *before* validation changes the validator's state.
-                let arity = wasmparser::Operator::$op $({ $($arg: $arg.clone()),* })?
-                    .operator_arity(&self.validator);
-                self.validator.$visit($($($arg.clone()),*)?)?;
-                implement_some_operators!((self.stack) arity $op $({ $($arg),* })? => $visit)
+                let arity = operator.operator_arity(&*self.validator);
+                self.validator.op(self.offset, &operator)?;
+                implement_some_operators!(self arity $op $({ $($arg),* })? => $visit)
             }
         )*
     };
 }
 
-impl<'a, 'w, V, W: Write> VisitOperator<'a> for OperatorVisitor<'_, 'w, V, W>
+impl<'a, 'w, T, W: Write> VisitOperator<'a> for OperatorVisitor<'_, 'w, T, W>
 where
-    V: VisitOperator<'a, Output = Result<(), wasmparser::Error>> + ModuleArity,
+    T: WasmModuleResources,
 {
     type Output = Result<()>;
     for_each_visit_operator!(define_forward);
