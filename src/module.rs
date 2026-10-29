@@ -11,7 +11,6 @@ use wasmparser::{
 
 /* STRING CONSTANTS */
 static W2CC: &str = "w2cc_";
-static W2C: &str = "w2c_";
 static FUNC: &str = "f";
 static LOCAL: &str = "l";
 
@@ -96,9 +95,9 @@ struct FuncNames<'a> {
 impl FuncNames<'_> {
     fn name(&self, index: u32) -> String {
         if let Some(name) = self.names.get(&index) {
-            return format!("{W2C}{name}");
+            return format!("{name}");
         }
-        format!("{W2C}{FUNC}{index}")
+        format!("{FUNC}{index}")
     }
 
     // list of export names of function
