@@ -71,7 +71,6 @@ fn run_script(file: &Path) -> Result<String> {
 
     match wast2c(&script, &mut output, allow_confusing_unicode) {
         Ok(num_directives) => {
-            eprintln!("Running {name}...");
             let num_successes = run(&body, &header)?;
             Ok(format!(
                 "{name}: {num_successes}/{num_directives} tests passed."
