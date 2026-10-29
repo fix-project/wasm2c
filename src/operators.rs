@@ -30,23 +30,45 @@ pub(crate) struct ExpressionPrinter<'w, W> {
 
 // TODO: use a better writer abstraction so we are not interpolating strings so closely
 impl<'w, W: Write> ExpressionPrinter<'w, W> {
-    fn visit_i32_const(&mut self, value: i32, _params: &[Operand]) -> Result<()> {
+    fn visit_i32_const<T: WasmModuleResources>(
+        &mut self,
+        value: i32,
+        _params: &[Operand],
+        _validator: &FuncValidator<T>,
+    ) -> Result<()> {
         self.push(&ValType::I32, value)
     }
 
-    fn visit_i64_const(&mut self, value: i64, _params: &[Operand]) -> Result<()> {
+    fn visit_i64_const<T: WasmModuleResources>(
+        &mut self,
+        value: i64,
+        _params: &[Operand],
+        _validator: &FuncValidator<T>,
+    ) -> Result<()> {
         self.push(&ValType::I64, value)
     }
 
-    fn visit_i32_add(&mut self, params: &[Operand]) -> Result<()> {
+    fn visit_i32_add<T: WasmModuleResources>(
+        &mut self,
+        params: &[Operand],
+        _validator: &FuncValidator<T>,
+    ) -> Result<()> {
         self.push(&ValType::I32, format!("{} + {}", params[0], params[1]))
     }
 
-    fn visit_drop(&mut self, _params: &[Operand]) -> Result<()> {
+    fn visit_drop<T: WasmModuleResources>(
+        &mut self,
+        _params: &[Operand],
+        _validator: &FuncValidator<T>,
+    ) -> Result<()> {
         Ok(())
     }
 
-    fn visit_end(&mut self, params: &[Operand]) -> Result<()> {
+    fn visit_end<T: WasmModuleResources>(
+        &mut self,
+        params: &[Operand],
+        _validator: &FuncValidator<T>,
+    ) -> Result<()> {
         ensure!(self.frame_depth == 0, "non-function end unimplemented");
         debug_assert!(self.stack.is_empty());
         if params.is_empty() {
@@ -107,22 +129,10 @@ macro_rules! implement_some_operators {
     // ($self:tt $arity:tt If       $($t:tt)*) => { implement_some_operators!(@forward-validator $self $arity $($t)*) };
 
     (@forward $self:tt $arity:tt $({ $($arg:ident),* })? => $visit:ident) => {{
-        implement_some_operators!(@base $self $arity (|params: &[Operand]| -> Result<()> {
-            ($self.stack).$visit($($($arg,)*)? params)
-        }))
-    }};
-
-    (@forward-validator $self:tt $arity:tt $({ $($arg:ident),* })? => $visit:ident) => {{
-        implement_some_operators!(@base $self $arity (|params: &[Operand]| -> Result<()> {
-            ($self.stack).$visit(&*($self.validator), $($($arg,)*)? params)
-        }))
-    }};
-
-    (@base $self:tt $arity:tt $call:tt) => {{
         let (num_params, num_results) = $arity.expect("arity for valid operator");
         let params: SmallVec<[Operand;2]> = (0..num_params).map(|_| ($self.stack).pop()).collect();
         let push_count_pre = ($self.stack).counter;
-        ($call)(&params)?;
+        ($self.stack).$visit($($($arg,)*)? &params, &*($self.validator))?;
         debug_assert_eq!(($self.stack).counter - push_count_pre, num_results as usize,
                          "push count for {} (left) did not match arity (right)", stringify!($visit));
     	Ok(())
