@@ -22,7 +22,6 @@ impl Display for Operand {
 pub(crate) struct ExpressionPrinter<'w, W> {
     counter: usize,
     stack: Vec<Operand>,
-    frame_depth: usize, // TODO: increment on block/etc.
     out: &'w mut W,
 }
 
@@ -119,7 +118,6 @@ impl<'w, W: Write> ExpressionPrinter<'w, W> {
         Self {
             counter: 0,
             stack: vec![],
-            frame_depth: 0,
             out,
         }
     }
