@@ -11,6 +11,7 @@ use wasmparser::{
 
 /* STRING CONSTANTS */
 static W2CC: &str = "w2cc_";
+static W2C: &str = "w2c_";
 static FUNC: &str = "f";
 static LOCAL: &str = "l";
 
@@ -74,8 +75,7 @@ fn print_typedefs(out: &mut impl Write) -> Result<()> {
 }
 
 // function name handling
-// a functions name can come from either being explicitly
-// named or exported under the same or a different name
+// if given $name then $name, else generic f{index}
 struct FuncNames<'a> {
     exports: HashMap<u32, Vec<&'a str>>, // func index -> export names
     names: HashMap<u32, &'a str>,        // func index -> name section $name
@@ -83,32 +83,22 @@ struct FuncNames<'a> {
 }
 
 // NAMING LOGIC
+// every function is private, under w2c_{name}
+// every export is a public wrapper, under the export name
 // fn           export names    behavior
-// <unnamed>    <none>          generic f{index}
-// <unnamed>    a               public a()
-// <unnamed>    a, b            public a(), public wrapper b() { return a() }
-// $a           <none>          private a()
-// $a           a, b            public a(), public wrapper b() { return a() }
-// $a           b, c            private a(), public wrappers b() c() { return a() }
+// <unnamed>    <none>          private w2c_f{index}()
+// <unnamed>    a               private w2c_f{index}(), public wrapper a() { return w2c_f{index}() }
+// $a           <none>          private w2c_a()
+// $a           a, b            private w2c_a(), public wrappers a() b() { return w2c_a() }
 
-// TODO: name collisions if $f0 or (export "f0") matches generic format (just make it less generic?)
+// TODO: name collisions if $f0 matches generic format, or an export name starts with w2c_
 // TODO: handle valid names in wat / wasm but invalid in c++
 impl FuncNames<'_> {
     fn name(&self, index: u32) -> String {
         if let Some(name) = self.names.get(&index) {
-            return name.to_string();
+            return format!("{W2C}{name}");
         }
-        if let Some(export) = self.exports(index).first() {
-            return export.to_string();
-        }
-        format!("{FUNC}{index}")
-    }
-
-    // is_public = if any export is under same name
-    // this is to avoid invalid C++ syntax
-    fn is_public(&self, index: u32) -> bool {
-        let name = self.name(index);
-        self.exports(index).contains(&name.as_str())
+        format!("{W2C}{FUNC}{index}")
     }
 
     // list of export names of function
@@ -233,29 +223,18 @@ fn print_module_declaration(
 ) -> Result<()> {
     writeln!(output, "class {class_name} {{")?;
 
-    // private functions
-    // i.e. not exported, or not exported under same name
+    // private functions signatures
     for (f, _body) in funcs {
-        if !names.is_public(f.index) {
-            print_function_signature(f, &names.name(f.index), names, output)?;
-            writeln!(output, ";")?;
-        }
+        print_function_signature(f, &names.name(f.index), names, output)?;
+        writeln!(output, ";")?;
     }
 
     writeln!(output, "\npublic:")?;
 
-    // public functions
-    // i.e. functions exported under their own name, wrapper for all other export names
+    // exports
     for (f, _body) in funcs {
-        let name = names.name(f.index);
-        if names.is_public(f.index) {
-            print_function_signature(f, &name, names, output)?;
-            writeln!(output, ";")?;
-        }
         for export in names.exports(f.index) {
-            if *export != name {
-                print_wrapper(f, export, &name, names, output)?;
-            }
+            print_wrapper(f, export, &names.name(f.index), names, output)?;
         }
     }
 
