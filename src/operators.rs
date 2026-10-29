@@ -1,4 +1,4 @@
-use anyhow::{Result, bail, ensure};
+use anyhow::{Result, bail};
 use itertools::Itertools;
 use smallvec::SmallVec;
 use std::{
@@ -6,10 +6,11 @@ use std::{
     io::Write,
 };
 use wasmparser::{
-    FrameKind, FrameStack, FuncValidator, ValType, VisitOperator, WasmModuleResources,
+    BlockType, FrameKind, FrameStack, FuncValidator, ValType, VisitOperator, WasmModuleResources,
     for_each_visit_operator,
 };
 
+#[derive(Clone)]
 struct Operand(usize);
 
 impl Display for Operand {
@@ -67,22 +68,50 @@ impl<'w, W: Write> ExpressionPrinter<'w, W> {
     fn visit_end<T: WasmModuleResources>(
         &mut self,
         params: &[Operand],
+        validator: &FuncValidator<T>,
+    ) -> Result<()> {
+        let control_frame = validator.get_control_frame(0);
+
+        if let Some(control_frame) = control_frame {
+            self.enter_control_frame(params);
+
+            match control_frame.kind {
+                FrameKind::Block => {
+                    // Write label for future `br`
+                    writeln!(self.out, "block{}:", control_frame.height)?;
+
+                    Ok(())
+                }
+                kind => bail!("exit on {kind:?} is not implemented"),
+            }
+        } else {
+            // Function end
+            debug_assert!(self.stack.is_empty());
+            if params.is_empty() {
+                // no need to do anything at the end of the function
+            } else if params.len() == 1 {
+                writeln!(self.out, "return {};", params[0])?;
+            } else {
+                writeln!(
+                    self.out,
+                    "return {{{}}};",
+                    params.iter().rev().map(ToString::to_string).format(", ")
+                )?;
+            }
+            self.counter += params.len(); // "end" operand formally pushes params to outer frame
+            Ok(())
+        }
+    }
+
+    fn visit_block<T: WasmModuleResources>(
+        &mut self,
+        _block_type: BlockType,
+        params: &[Operand],
         _validator: &FuncValidator<T>,
     ) -> Result<()> {
-        ensure!(self.frame_depth == 0, "non-function end unimplemented");
-        debug_assert!(self.stack.is_empty());
-        if params.is_empty() {
-            // no need to do anything at the end of the function
-        } else if params.len() == 1 {
-            writeln!(self.out, "return {};", params[0])?;
-        } else {
-            writeln!(
-                self.out,
-                "return {{{}}};",
-                params.iter().rev().map(ToString::to_string).format(", ")
-            )?;
-        }
-        self.counter += params.len(); // "end" operand formally pushes params to outer frame
+        // Re-push `params` again
+        self.enter_control_frame(params);
+
         Ok(())
     }
 
@@ -117,6 +146,12 @@ impl<'w, W: Write> ExpressionPrinter<'w, W> {
     fn pop(&mut self) -> Operand {
         self.stack.pop().unwrap()
     }
+
+    fn enter_control_frame(&mut self, params: &[Operand]) {
+        // Restore params that were automatically popped
+        self.stack.extend(params.iter().cloned());
+        self.counter += params.len();
+    }
 }
 
 macro_rules! implement_some_operators {
@@ -126,7 +161,7 @@ macro_rules! implement_some_operators {
     ($self:tt $arity:tt I32Add   $($t:tt)*) => { implement_some_operators!(@forward $self $arity $($t)*) };
     ($self:tt $arity:tt Drop     $($t:tt)*) => { implement_some_operators!(@forward $self $arity $($t)*) };
     ($self:tt $arity:tt End      $($t:tt)*) => { implement_some_operators!(@forward $self $arity $($t)*) };
-    // ($self:tt $arity:tt If       $($t:tt)*) => { implement_some_operators!(@forward-validator $self $arity $($t)*) };
+    ($self:tt $arity:tt Block    $($t:tt)*) => { implement_some_operators!(@forward $self $arity $($t)*) };
 
     (@forward $self:tt $arity:tt $({ $($arg:ident),* })? => $visit:ident) => {{
         let (num_params, num_results) = $arity.expect("arity for valid operator");
