@@ -35,8 +35,11 @@ extern "C" int run_program(const char *source, std::size_t source_length,
                            unsigned int *num_successes) noexcept {
     // The asm parser is required too: the C++ standard library headers pull in
     // inline asm, which the JIT cannot lower without it.
-    if (InitializeNativeTarget() || InitializeNativeTargetAsmPrinter() ||
-        InitializeNativeTargetAsmParser()) {
+    static const bool target_init_failed = InitializeNativeTarget() ||
+                                           InitializeNativeTargetAsmPrinter() ||
+                                           InitializeNativeTargetAsmParser();
+    // modification to global target registry has to be thread-safe
+    if (target_init_failed) {
         return 1;
     }
 

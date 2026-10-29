@@ -4,7 +4,12 @@ use crate::jit::run;
 use anyhow::{Result, ensure};
 use clap::Parser;
 use clio::ClioPath;
-use std::{ffi::OsStr, fs, path::PathBuf};
+use rayon::prelude::*;
+use std::{
+    ffi::OsStr,
+    fs,
+    path::{Path, PathBuf},
+};
 use walkdir::WalkDir;
 use wasm2c::{OutputSpec, wast2c};
 
@@ -35,36 +40,43 @@ fn main() -> Result<()> {
     files.dedup();
     ensure!(!files.is_empty(), "no .wast files found");
 
-    for file in &files {
-        // TODO: use rayon to make parallel
-        let script = fs::read_to_string(file)?;
+    // 8 MiB stack per thread
+    rayon::ThreadPoolBuilder::new()
+        .stack_size(8 * 1024 * 1024)
+        .build_global()?;
 
-        let mut header = Vec::new();
-        let mut body = Vec::new();
-
-        let mut output = OutputSpec::Split {
-            hh_include: String::from("input.hh"),
-            hh: &mut header,
-            cc: &mut body,
-        };
-
-        let name = file.file_name().unwrap_or_default().to_string_lossy();
-
-        let allow_confusing_unicode = name == "names.wast"; // spec test with a lot of confusing Unicode
-
-        match wast2c(&script, &mut output, allow_confusing_unicode) {
-            Ok(num_directives) => {
-                eprint!("Running {name}... ");
-                let num_successes = run(&body, &header)?;
-                eprintln!("done.");
-
-                println!("{name}: {num_successes}/{num_directives} tests passed.",);
-            }
-            Err(e) => {
-                println!("{name} error: {e}.",);
-            }
-        }
+    // Collect results in sorted order
+    let reports: Vec<Result<String>> = files.par_iter().map(|file| run_script(file)).collect();
+    for report in reports {
+        println!("{}", report?);
     }
-
     Ok(())
+}
+
+// Converts one .wast file to C++, JIT-compiles and runs it, and returns summary
+fn run_script(file: &Path) -> Result<String> {
+    let script = fs::read_to_string(file)?;
+    let mut header = Vec::new();
+    let mut body = Vec::new();
+
+    let mut output = OutputSpec::Split {
+        hh_include: String::from("input.hh"),
+        hh: &mut header,
+        cc: &mut body,
+    };
+
+    let name = file.file_name().unwrap_or_default().to_string_lossy();
+
+    let allow_confusing_unicode = name == "names.wast"; // spec test with a lot of confusing Unicode
+
+    match wast2c(&script, &mut output, allow_confusing_unicode) {
+        Ok(num_directives) => {
+            eprintln!("Running {name}...");
+            let num_successes = run(&body, &header)?;
+            Ok(format!(
+                "{name}: {num_successes}/{num_directives} tests passed."
+            ))
+        }
+        Err(e) => Ok(format!("{name} error: {e}.")),
+    }
 }

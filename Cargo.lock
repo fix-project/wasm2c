@@ -1656,6 +1656,7 @@ dependencies = [
  "cc",
  "clap",
  "clio",
+ "rayon",
  "walkdir",
  "wasm2c",
 ]
