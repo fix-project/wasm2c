@@ -95,7 +95,7 @@ struct FuncNames<'a> {
 impl FuncNames<'_> {
     fn name(&self, index: u32) -> String {
         if let Some(name) = self.names.get(&index) {
-            return format!("{name}");
+            return name.to_string();
         }
         format!("{FUNC}{index}")
     }
