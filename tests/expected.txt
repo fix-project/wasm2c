@@ -2,12 +2,12 @@ seven.wast: 2/2 tests passed.
 address.wast error: operator LocalGet unimplemented.
 align.wast error: operator I32Load8S unimplemented.
 binary-leb128.wast: 25/81 tests passed.
-binary.wast error: operator Block unimplemented.
-block.wast error: operator Block unimplemented.
-br.wast error: operator Block unimplemented.
-br_if.wast error: operator Block unimplemented.
-br_table.wast error: operator Block unimplemented.
-break-drop.wast error: operator Block unimplemented.
+binary.wast error: operator If unimplemented.
+block.wast error: operator Nop unimplemented.
+br.wast error: operator Br unimplemented.
+br_if.wast error: operator BrIf unimplemented.
+br_table.wast error: operator BrTable unimplemented.
+break-drop.wast error: operator Br unimplemented.
 call.wast error: operator F32Const unimplemented.
 call_indirect.wast error: operator F32Const unimplemented.
 comments.wast: 4/4 tests passed.
@@ -40,10 +40,10 @@ imports.wast error: unimplemented Global.
 inline-module.wast: 1/1 tests passed.
 int_exprs.wast error: operator LocalGet unimplemented.
 int_literals.wast error: operator Return unimplemented.
-labels.wast error: operator Block unimplemented.
+labels.wast error: operator Br unimplemented.
 left-to-right.wast error: operator I32Store unimplemented.
 linking.wast error: operator Call unimplemented.
-load.wast error: operator Block unimplemented.
+load.wast error: operator I32Load unimplemented.
 local_get.wast error: operator LocalGet unimplemented.
 local_set.wast error: operator LocalSet unimplemented.
 local_tee.wast error: operator LocalTee unimplemented.
@@ -60,7 +60,7 @@ select.wast error: operator LocalGet unimplemented.
 skip-stack-guard-page.wast error: operator LocalGet unimplemented.
 stack.wast error: operator LocalGet unimplemented.
 start.wast error: operator I32Load8U unimplemented.
-store.wast error: operator Block unimplemented.
+store.wast error: operator I32Store unimplemented.
 switch.wast error: operator LocalSet unimplemented.
 token.wast: 0/2 tests passed.
 traps.wast error: operator LocalGet unimplemented.
