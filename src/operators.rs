@@ -1,3 +1,4 @@
+use crate::module::GLOBAL;
 use anyhow::{Result, bail};
 use itertools::Itertools;
 use smallvec::SmallVec;
@@ -65,6 +66,31 @@ impl<'w, W: Write> ExpressionPrinter<'w, W> {
         _control_frame: Frame,
         _validator: &FuncValidator<T>,
     ) -> Result<()> {
+        Ok(())
+    }
+
+    fn visit_global_get<T: WasmModuleResources>(
+        &mut self,
+        global_index: u32,
+        _params: &[Operand],
+        _control_frame: Frame,
+        validator: &FuncValidator<T>,
+    ) -> Result<()> {
+        let global = validator
+            .resources()
+            .global_at(global_index)
+            .expect("global for valid operator");
+        self.push(&global.content_type, format!("{GLOBAL}{global_index}"))
+    }
+
+    fn visit_global_set<T: WasmModuleResources>(
+        &mut self,
+        global_index: u32,
+        params: &[Operand],
+        _control_frame: Frame,
+        _validator: &FuncValidator<T>,
+    ) -> Result<()> {
+        writeln!(self.out, "{GLOBAL}{global_index} = {};", params[0])?;
         Ok(())
     }
 
@@ -161,12 +187,14 @@ impl<'w, W: Write> ExpressionPrinter<'w, W> {
 
 macro_rules! implement_some_operators {
     // Implemented operators can be added here incrementally.
-    ($self:tt $arity:tt $cf:tt I32Const $($t:tt)*) => { implement_some_operators!(@forward $self $arity $cf $($t)*) };
-    ($self:tt $arity:tt $cf:tt I64Const $($t:tt)*) => { implement_some_operators!(@forward $self $arity $cf $($t)*) };
-    ($self:tt $arity:tt $cf:tt I32Add   $($t:tt)*) => { implement_some_operators!(@forward $self $arity $cf $($t)*) };
-    ($self:tt $arity:tt $cf:tt Drop     $($t:tt)*) => { implement_some_operators!(@forward $self $arity $cf $($t)*) };
-    ($self:tt $arity:tt $cf:tt End      $($t:tt)*) => { implement_some_operators!(@forward $self $arity $cf $($t)*) };
-    ($self:tt $arity:tt $cf:tt Block    $($t:tt)*) => { implement_some_operators!(@forward $self $arity $cf $($t)*) };
+    ($self:tt $arity:tt $cf:tt I32Const  $($t:tt)*) => { implement_some_operators!(@forward $self $arity $cf $($t)*) };
+    ($self:tt $arity:tt $cf:tt I64Const  $($t:tt)*) => { implement_some_operators!(@forward $self $arity $cf $($t)*) };
+    ($self:tt $arity:tt $cf:tt I32Add    $($t:tt)*) => { implement_some_operators!(@forward $self $arity $cf $($t)*) };
+    ($self:tt $arity:tt $cf:tt Drop      $($t:tt)*) => { implement_some_operators!(@forward $self $arity $cf $($t)*) };
+    ($self:tt $arity:tt $cf:tt GlobalGet $($t:tt)*) => { implement_some_operators!(@forward $self $arity $cf $($t)*) };
+    ($self:tt $arity:tt $cf:tt GlobalSet $($t:tt)*) => { implement_some_operators!(@forward $self $arity $cf $($t)*) };
+    ($self:tt $arity:tt $cf:tt End       $($t:tt)*) => { implement_some_operators!(@forward $self $arity $cf $($t)*) };
+    ($self:tt $arity:tt $cf:tt Block     $($t:tt)*) => { implement_some_operators!(@forward $self $arity $cf $($t)*) };
 
     (@forward $self:tt $arity:tt $cf:tt $({ $($arg:ident),* })? => $visit:ident) => {{
         let (num_params, num_results) = $arity.expect("arity for valid operator");
