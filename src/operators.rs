@@ -1,3 +1,4 @@
+use crate::module::Module;
 use anyhow::{Result, bail};
 use itertools::Itertools;
 use smallvec::SmallVec;
@@ -17,6 +18,7 @@ impl Display for Operand {
 }
 
 pub(crate) struct ExpressionPrinter<'w, W> {
+    module: &'w Module<'w>,
     stack: Vec<Operand>,
     pending: Vec<ValType>,
     push_counter: usize,
@@ -36,6 +38,8 @@ impl<'w, W: Write> ExpressionPrinter<'w, W> {
             Drop => Ok(()),
             Block { .. } => self.enter_frame(op, params),
             End => self.visit_end(params, frame),
+            GlobalGet { global_index } => self.push(self.module.global_names.get(*global_index)),
+            GlobalSet { global_index } => self.visit_global_set(*global_index, params),
             op => bail!("operator {} unimplemented", op_name(op)),
         }
     }
@@ -61,8 +65,15 @@ impl<'w, W: Write> ExpressionPrinter<'w, W> {
         }
     }
 
-    pub fn new(out: &'w mut W) -> Self {
+    fn visit_global_set(&mut self, global_index: u32, params: Params) -> Result<()> {
+        let name = self.module.global_names.get(global_index);
+        writeln!(self.out, "{name} = {};", params[0])?;
+        Ok(())
+    }
+
+    pub fn new(module: &'w Module<'w>, out: &'w mut W) -> Self {
         Self {
+            module,
             stack: vec![],
             pending: vec![],
             push_counter: 0,
