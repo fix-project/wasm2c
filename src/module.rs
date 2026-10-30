@@ -344,10 +344,9 @@ impl<'a> ParsedFunc<'a> {
 
         let mut printer = ExpressionPrinter::new(output);
         while !reader.eof() {
-            reader
-                .visit_operator(&mut printer.visitor(f.visitor(reader.original_position())))??;
+            reader.visit_operator(&mut printer.visitor(&mut f, reader.original_position()))??;
         }
-        reader.finish_expression(&printer.visitor(f.visitor(reader.original_position())))?;
+        reader.finish_expression(&printer.visitor(&mut f, reader.original_position()))?;
         Ok(f.into_allocations())
     }
 }

@@ -6,8 +6,8 @@ use std::{
     io::Write,
 };
 use wasmparser::{
-    BlockType, FrameKind, FrameStack, FuncValidator, ValType, VisitOperator, WasmModuleResources,
-    for_each_visit_operator,
+    BlockType, Frame, FrameKind, FrameStack, FuncValidator, ValType, VisitOperator,
+    WasmModuleResources, for_each_visit_operator,
 };
 
 #[derive(Clone)]
@@ -34,6 +34,7 @@ impl<'w, W: Write> ExpressionPrinter<'w, W> {
         &mut self,
         value: i32,
         _params: &[Operand],
+        _control_frame: Frame,
         _validator: &FuncValidator<T>,
     ) -> Result<()> {
         self.push(&ValType::I32, value)
@@ -43,6 +44,7 @@ impl<'w, W: Write> ExpressionPrinter<'w, W> {
         &mut self,
         value: i64,
         _params: &[Operand],
+        _control_frame: Frame,
         _validator: &FuncValidator<T>,
     ) -> Result<()> {
         self.push(&ValType::I64, value)
@@ -51,6 +53,7 @@ impl<'w, W: Write> ExpressionPrinter<'w, W> {
     fn visit_i32_add<T: WasmModuleResources>(
         &mut self,
         params: &[Operand],
+        _control_frame: Frame,
         _validator: &FuncValidator<T>,
     ) -> Result<()> {
         self.push(&ValType::I32, format!("{} + {}", params[0], params[1]))
@@ -59,6 +62,7 @@ impl<'w, W: Write> ExpressionPrinter<'w, W> {
     fn visit_drop<T: WasmModuleResources>(
         &mut self,
         _params: &[Operand],
+        _control_frame: Frame,
         _validator: &FuncValidator<T>,
     ) -> Result<()> {
         Ok(())
@@ -67,11 +71,13 @@ impl<'w, W: Write> ExpressionPrinter<'w, W> {
     fn visit_end<T: WasmModuleResources>(
         &mut self,
         params: &[Operand],
+        control_frame: Frame,
         validator: &FuncValidator<T>,
     ) -> Result<()> {
-        let control_frame = validator.get_control_frame(0);
-
-        if let Some(control_frame) = control_frame {
+        // We still are in a function
+        // wasmparser wraps functions in a `block` control frame
+        // once we're at the final end, all control frames on validator have been popped
+        if validator.control_stack_height() > 0 {
             self.enter_control_frame(params);
 
             match control_frame.kind {
@@ -106,6 +112,7 @@ impl<'w, W: Write> ExpressionPrinter<'w, W> {
         &mut self,
         _block_type: BlockType,
         params: &[Operand],
+        _control_frame: Frame,
         _validator: &FuncValidator<T>,
     ) -> Result<()> {
         // Re-push `params` again
@@ -154,25 +161,25 @@ impl<'w, W: Write> ExpressionPrinter<'w, W> {
 
 macro_rules! implement_some_operators {
     // Implemented operators can be added here incrementally.
-    ($self:tt $arity:tt I32Const $($t:tt)*) => { implement_some_operators!(@forward $self $arity $($t)*) };
-    ($self:tt $arity:tt I64Const $($t:tt)*) => { implement_some_operators!(@forward $self $arity $($t)*) };
-    ($self:tt $arity:tt I32Add   $($t:tt)*) => { implement_some_operators!(@forward $self $arity $($t)*) };
-    ($self:tt $arity:tt Drop     $($t:tt)*) => { implement_some_operators!(@forward $self $arity $($t)*) };
-    ($self:tt $arity:tt End      $($t:tt)*) => { implement_some_operators!(@forward $self $arity $($t)*) };
-    ($self:tt $arity:tt Block    $($t:tt)*) => { implement_some_operators!(@forward $self $arity $($t)*) };
+    ($self:tt $arity:tt $cf:tt I32Const $($t:tt)*) => { implement_some_operators!(@forward $self $arity $cf $($t)*) };
+    ($self:tt $arity:tt $cf:tt I64Const $($t:tt)*) => { implement_some_operators!(@forward $self $arity $cf $($t)*) };
+    ($self:tt $arity:tt $cf:tt I32Add   $($t:tt)*) => { implement_some_operators!(@forward $self $arity $cf $($t)*) };
+    ($self:tt $arity:tt $cf:tt Drop     $($t:tt)*) => { implement_some_operators!(@forward $self $arity $cf $($t)*) };
+    ($self:tt $arity:tt $cf:tt End      $($t:tt)*) => { implement_some_operators!(@forward $self $arity $cf $($t)*) };
+    ($self:tt $arity:tt $cf:tt Block    $($t:tt)*) => { implement_some_operators!(@forward $self $arity $cf $($t)*) };
 
-    (@forward $self:tt $arity:tt $({ $($arg:ident),* })? => $visit:ident) => {{
+    (@forward $self:tt $arity:tt $cf:tt $({ $($arg:ident),* })? => $visit:ident) => {{
         let (num_params, num_results) = $arity.expect("arity for valid operator");
         let params: SmallVec<[Operand;2]> = (0..num_params).map(|_| ($self.stack).pop()).collect();
         let push_count_pre = ($self.stack).counter;
-        ($self.stack).$visit($($($arg,)*)? &params, &*($self.validator))?;
+        ($self.stack).$visit($($($arg,)*)? &params, $cf, &*($self.validator))?;
         debug_assert_eq!(($self.stack).counter - push_count_pre, num_results as usize,
                          "push count for {} (left) did not match arity (right)", stringify!($visit));
     	Ok(())
     }};
 
     // Bail out gracefully on any other operator.
-    ($self:tt $arity:tt $op:ident $($t:tt)*) => {{ let _ = $arity;
+    ($self:tt $arity:tt $cf:tt $op:ident $($t:tt)*) => {{ let _ = ($arity, $cf);
 						   bail!("operator {} unimplemented", stringify!($op)); }};
 }
 
@@ -196,8 +203,9 @@ macro_rules! define_forward {
                 let operator = wasmparser::Operator::$op $({ $($arg: $arg.clone()),* })?;
                 // Compute the arity *before* validation changes the validator's state.
                 let arity = operator.operator_arity(&*self.validator);
+                let control_frame = self.validator.get_control_frame(0).copied().unwrap();
                 self.validator.op(self.offset, &operator)?;
-                implement_some_operators!(self arity $op $({ $($arg),* })? => $visit)
+                implement_some_operators!(self arity control_frame $op $({ $($arg),* })? => $visit)
             }
         )*
     };
