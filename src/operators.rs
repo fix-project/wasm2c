@@ -6,11 +6,11 @@ use std::{
     io::Write,
 };
 use wasmparser::{
-    BlockType, Frame, FrameKind, FrameStack, FuncValidator, ValType, VisitOperator,
+    BlockType, Frame, FrameKind, FrameStack, FuncValidator, Operator, ValType, VisitOperator,
     WasmModuleResources, for_each_visit_operator,
 };
 
-#[derive(Clone)]
+#[derive(Copy, Clone)]
 struct Operand(usize);
 
 impl Display for Operand {
@@ -20,9 +20,15 @@ impl Display for Operand {
 }
 
 pub(crate) struct ExpressionPrinter<'w, W> {
-    counter: usize,
     stack: Vec<Operand>,
+    pending: Vec<ValType>,
+    push_counter: usize,
     out: &'w mut W,
+}
+
+struct OpInfo {
+    params: SmallVec<[Operand; 2]>,
+    frame: Frame,
 }
 
 // Implementations of a few operators.
@@ -30,101 +36,63 @@ pub(crate) struct ExpressionPrinter<'w, W> {
 
 // TODO: use a better writer abstraction so we are not interpolating strings so closely
 impl<'w, W: Write> ExpressionPrinter<'w, W> {
-    fn visit_i32_const<T: WasmModuleResources>(
-        &mut self,
-        value: i32,
-        _params: &[Operand],
-        _control_frame: Frame,
-        _validator: &FuncValidator<T>,
-    ) -> Result<()> {
-        self.push(&ValType::I32, value)
+    fn visit_i32_const(&mut self, value: i32, _info: &OpInfo) -> Result<()> {
+        self.push(value)
     }
 
-    fn visit_i64_const<T: WasmModuleResources>(
-        &mut self,
-        value: i64,
-        _params: &[Operand],
-        _control_frame: Frame,
-        _validator: &FuncValidator<T>,
-    ) -> Result<()> {
-        self.push(&ValType::I64, value)
+    fn visit_i64_const(&mut self, value: i64, _info: &OpInfo) -> Result<()> {
+        self.push(value)
     }
 
-    fn visit_i32_add<T: WasmModuleResources>(
-        &mut self,
-        params: &[Operand],
-        _control_frame: Frame,
-        _validator: &FuncValidator<T>,
-    ) -> Result<()> {
-        self.push(&ValType::I32, format!("{} + {}", params[0], params[1]))
+    fn visit_i32_add(&mut self, info: &OpInfo) -> Result<()> {
+        self.push(format!("{} + {}", info.params[0], info.params[1]))
     }
 
-    fn visit_drop<T: WasmModuleResources>(
-        &mut self,
-        _params: &[Operand],
-        _control_frame: Frame,
-        _validator: &FuncValidator<T>,
-    ) -> Result<()> {
+    fn visit_drop(&mut self, _info: &OpInfo) -> Result<()> {
         Ok(())
     }
 
-    fn visit_end<T: WasmModuleResources>(
-        &mut self,
-        params: &[Operand],
-        control_frame: Frame,
-        validator: &FuncValidator<T>,
-    ) -> Result<()> {
-        // We still are in a function
-        // wasmparser wraps functions in a `block` control frame
-        // once we're at the final end, all control frames on validator have been popped
-        if validator.control_stack_height() > 0 {
-            self.enter_control_frame(params);
+    fn visit_end(&mut self, info: &OpInfo) -> Result<()> {
+        self.cross_frame(&info.params);
 
-            match control_frame.kind {
-                FrameKind::Block => {
-                    // Write label for future `br`
-                    writeln!(self.out, "block{}:", control_frame.height)?;
+        match info.frame.kind {
+            FrameKind::Block => {
+                // TODO: write label with unique name (or names-section-assigned name)
+                writeln!(self.out, "block{}:", info.frame.height)?;
 
-                    Ok(())
-                }
-                kind => bail!("exit on {kind:?} is not implemented"),
+                Ok(())
             }
-        } else {
-            // Function end
-            debug_assert!(self.stack.is_empty());
-            if params.is_empty() {
-                // no need to do anything at the end of the function
-            } else if params.len() == 1 {
-                writeln!(self.out, "return {};", params[0])?;
-            } else {
-                writeln!(
-                    self.out,
-                    "return {{{}}};",
-                    params.iter().rev().map(ToString::to_string).format(", ")
-                )?;
-            }
-            self.counter += params.len(); // "end" operand formally pushes params to outer frame
-            Ok(())
+            kind => bail!("exit on {kind:?} is not implemented"),
         }
     }
 
-    fn visit_block<T: WasmModuleResources>(
-        &mut self,
-        _block_type: BlockType,
-        params: &[Operand],
-        _control_frame: Frame,
-        _validator: &FuncValidator<T>,
-    ) -> Result<()> {
+    pub(crate) fn finish(&mut self) -> Result<()> {
+        // Function end
+        debug_assert!(self.pending.is_empty());
+        match self.stack.as_slice() {
+            [] => {} // no need to do anything at the end of the function
+            [param] => writeln!(self.out, "return {};", param)?,
+            params => writeln!(
+                self.out,
+                "return {{{}}};",
+                params.iter().rev().map(ToString::to_string).format(", ")
+            )?,
+        }
+        Ok(())
+    }
+
+    fn visit_block(&mut self, _ty: BlockType, info: &OpInfo) -> Result<()> {
         // Re-push `params` again
-        self.enter_control_frame(params);
+        self.cross_frame(&info.params);
 
         Ok(())
     }
 
     pub fn new(out: &'w mut W) -> Self {
         Self {
-            counter: 0,
             stack: vec![],
+            pending: vec![],
+            push_counter: 0,
             out,
         }
     }
@@ -137,56 +105,54 @@ impl<'w, W: Write> ExpressionPrinter<'w, W> {
         OperatorVisitor {
             validator,
             offset,
-            stack: self,
+            printer: self,
         }
     }
 
-    fn push(&mut self, ty: &ValType, expr: impl Display) -> Result<()> {
-        let top_of_stack = self.stack.push_mut(Operand(self.counter));
+    fn push(&mut self, expr: impl Display) -> Result<()> {
+        let ty = self.pending.pop().unwrap();
+        let top_of_stack = self.stack.push_mut(Operand(self.push_counter));
         writeln!(self.out, "{ty} {top_of_stack} = {expr};")?;
-        self.counter += 1;
+        self.push_counter += 1;
+
         Ok(())
     }
 
-    fn pop(&mut self) -> Operand {
-        self.stack.pop().unwrap()
-    }
+    fn cross_frame(&mut self, params: &[Operand]) {
+        assert_eq!(params.len(), self.pending.len());
 
-    fn enter_control_frame(&mut self, params: &[Operand]) {
         // Restore params that were automatically popped
-        self.stack.extend(params.iter().cloned());
-        self.counter += params.len();
+        self.stack.extend_from_slice(params);
+        self.pending.clear();
     }
 }
 
-macro_rules! implement_some_operators {
+macro_rules! operator {
     // Implemented operators can be added here incrementally.
-    ($self:tt $arity:tt $cf:tt I32Const $($t:tt)*) => { implement_some_operators!(@forward $self $arity $cf $($t)*) };
-    ($self:tt $arity:tt $cf:tt I64Const $($t:tt)*) => { implement_some_operators!(@forward $self $arity $cf $($t)*) };
-    ($self:tt $arity:tt $cf:tt I32Add   $($t:tt)*) => { implement_some_operators!(@forward $self $arity $cf $($t)*) };
-    ($self:tt $arity:tt $cf:tt Drop     $($t:tt)*) => { implement_some_operators!(@forward $self $arity $cf $($t)*) };
-    ($self:tt $arity:tt $cf:tt End      $($t:tt)*) => { implement_some_operators!(@forward $self $arity $cf $($t)*) };
-    ($self:tt $arity:tt $cf:tt Block    $($t:tt)*) => { implement_some_operators!(@forward $self $arity $cf $($t)*) };
+    ($self:tt $info:tt I32Const $($t:tt)*) => { operator!(@forward $self $info $($t)*) };
+    ($self:tt $info:tt I64Const $($t:tt)*) => { operator!(@forward $self $info $($t)*) };
+    ($self:tt $info:tt I32Add   $($t:tt)*) => { operator!(@forward $self $info $($t)*) };
+    ($self:tt $info:tt Drop     $($t:tt)*) => { operator!(@forward $self $info $($t)*) };
+    ($self:tt $info:tt End      $($t:tt)*) => { operator!(@forward $self $info $($t)*) };
+    ($self:tt $info:tt Block    $($t:tt)*) => { operator!(@forward $self $info $($t)*) };
 
-    (@forward $self:tt $arity:tt $cf:tt $({ $($arg:ident),* })? => $visit:ident) => {{
-        let (num_params, num_results) = $arity.expect("arity for valid operator");
-        let params: SmallVec<[Operand;2]> = (0..num_params).map(|_| ($self.stack).pop()).collect();
-        let push_count_pre = ($self.stack).counter;
-        ($self.stack).$visit($($($arg,)*)? &params, $cf, &*($self.validator))?;
-        debug_assert_eq!(($self.stack).counter - push_count_pre, num_results as usize,
-                         "push count for {} (left) did not match arity (right)", stringify!($visit));
-    	Ok(())
+    (@forward $self:tt $info:tt $({ $($arg:ident),* })? => $visit:ident) =>
+    {{ $self.printer.$visit($($($arg,)*)? &$info)?;
+       if !$self.printer.pending.is_empty() {
+           panic!("visitor {} did not push enough operands", stringify!($visit));
+       }
+       Ok(())
     }};
 
     // Bail out gracefully on any other operator.
-    ($self:tt $arity:tt $cf:tt $op:ident $($t:tt)*) => {{ let _ = ($arity, $cf);
-						   bail!("operator {} unimplemented", stringify!($op)); }};
+    ($self:tt $info:ident $op:ident $($t:tt)*)
+        => {{ let _ = $info; bail!("operator {} unimplemented", stringify!($op)); }};
 }
 
 pub struct OperatorVisitor<'a, 'w, T, W> {
     validator: &'a mut FuncValidator<T>,
     offset: u64,
-    stack: &'a mut ExpressionPrinter<'w, W>,
+    printer: &'a mut ExpressionPrinter<'w, W>,
 }
 
 impl<'w, T: WasmModuleResources, W> FrameStack for OperatorVisitor<'_, 'w, T, W> {
@@ -195,20 +161,46 @@ impl<'w, T: WasmModuleResources, W> FrameStack for OperatorVisitor<'_, 'w, T, W>
     }
 }
 
-// Pair the ExpressionPrinter with a FuncValidator visitor to validate each operator first.
 macro_rules! define_forward {
     ($( @$proposal:ident $op:ident $({ $($arg:ident: $argty:ty),* })? => $visit:ident ($($ann:tt)*) )*) => {
         $(
             fn $visit(&mut self $($(, $arg: $argty)*)?) -> Result<()> {
                 let operator = wasmparser::Operator::$op $({ $($arg: $arg.clone()),* })?;
-                // Compute the arity *before* validation changes the validator's state.
-                let arity = operator.operator_arity(&*self.validator);
-                let control_frame = self.validator.get_control_frame(0).copied().unwrap();
-                self.validator.op(self.offset, &operator)?;
-                implement_some_operators!(self arity control_frame $op $({ $($arg),* })? => $visit)
+		let info = self.op(&operator)?;
+                operator!(self info $op $({ $($arg),* })? => $visit)
             }
         )*
     };
+}
+
+impl<'a, 'w, T: WasmModuleResources, W> OperatorVisitor<'a, 'w, T, W> {
+    fn op(&mut self, op: &Operator) -> Result<OpInfo> {
+        // Collect arity, top control frame, and params before validation changes the validator's state.
+        let Some((num_params, num_results)) = op.operator_arity(self.validator) else {
+            self.validator.op(self.offset, op)?; // report validation error
+            panic!("operator valid but missing arity");
+        };
+        let num_params: usize = num_params.try_into().unwrap();
+        let num_results: usize = num_results.try_into().unwrap();
+        let frame = self.validator.get_control_frame(0).copied().expect("frame");
+
+        // TODO: handle stack polymorphism in unreachable code
+        let params = (0..num_params)
+            .map(|_| self.printer.stack.pop().unwrap())
+            .collect();
+
+        // validate the operator
+        self.validator.op(self.offset, op)?;
+
+        // collect results
+        for i in 0..num_results {
+            self.printer
+                .pending
+                .push(self.validator.get_operand_type(i).unwrap().unwrap());
+        }
+
+        Ok(OpInfo { params, frame })
+    }
 }
 
 impl<'a, 'w, T, W: Write> VisitOperator<'a> for OperatorVisitor<'_, 'w, T, W>

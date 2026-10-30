@@ -337,6 +337,7 @@ impl<'a> Func<'a> {
             reader.visit_operator(&mut printer.visitor(&mut f, reader.original_position()))??;
         }
         reader.finish_expression(&printer.visitor(&mut f, reader.original_position()))?;
+        printer.finish()?;
         Ok(f.into_allocations())
     }
 
