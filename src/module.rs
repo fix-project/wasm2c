@@ -4,13 +4,14 @@ use convert_case::ccase;
 use itertools::Itertools;
 use std::{collections::HashMap, io::Write, mem};
 use wasmparser::{
-    Export, ExternalKind, FuncToValidate, FuncType, FuncValidatorAllocations, FunctionBody, Import,
-    Imports, KnownCustom, Name, Parser, Payload, TypeRef, ValType, ValidPayload, Validator,
-    ValidatorResources, WasmModuleResources,
+    Export, ExternalKind, FuncToValidate, FuncType, FuncValidatorAllocations, FunctionBody, Global,
+    Import, Imports, KnownCustom, Name, Operator, Parser, Payload, TypeRef, ValType, ValidPayload,
+    Validator, ValidatorResources, WasmModuleResources,
 };
 
 /* STRING CONSTANTS */
 static W2CC: &str = "w2cc_";
+pub(crate) static GLOBAL: &str = "global";
 
 pub fn wasm2c<U: Write>(name: &str, wasm: &[u8], output: &mut OutputSpec<U>) -> Result<String> {
     print_header_includes(&mut output.header())?;
@@ -115,6 +116,7 @@ struct ParsedModule<'a> {
     exports: Vec<Export<'a>>,
     funcs: Vec<ParsedFunc<'a>>,
     func_names: NamingMap<NameFunc>,
+    globals: Vec<Global<'a>>,
     num_func_imports: usize,
 }
 
@@ -132,6 +134,7 @@ impl<'a> ParsedModule<'a> {
         let mut exports = Vec::new();
         let mut funcs = Vec::new();
         let mut func_names = NamingMap::default();
+        let mut globals = Vec::new();
         let mut num_func_imports = 0;
 
         for payload in Parser::new(0).parse_all(wasm) {
@@ -153,7 +156,7 @@ impl<'a> ParsedModule<'a> {
                                     {
                                         bail!("unimplemented: export of function import")
                                     }
-                                    ExternalKind::Func => {
+                                    ExternalKind::Func | ExternalKind::Global => {
                                         exports.push(export);
                                     }
                                     _ => bail!("unimplemented {:?}", export.kind),
@@ -170,11 +173,23 @@ impl<'a> ParsedModule<'a> {
                                             ..
                                         },
                                     ) => num_func_imports += 1,
+                                    Imports::Single(
+                                        _,
+                                        Import {
+                                            ty: TypeRef::Global { .. },
+                                            ..
+                                        },
+                                    ) => bail!("unimplemented: global imports"),
                                     Imports::Single(_, _) => {} // TODO: other kinds of imports,
                                     Imports::Compact1 { .. } | Imports::Compact2 { .. } => {
                                         bail!("unimplemented: compact imports")
                                     }
                                 }
+                            }
+                        }
+                        Payload::GlobalSection(reader) => {
+                            for global in reader {
+                                globals.push(global?);
                             }
                         }
                         Payload::CustomSection(reader) => {
@@ -226,12 +241,18 @@ impl<'a> ParsedModule<'a> {
             exports,
             funcs,
             func_names,
+            globals,
             num_func_imports,
         })
     }
 
     fn print_module_declaration(&self, class_name: &str, output: &mut impl Write) -> Result<()> {
         writeln!(output, "class {class_name} {{")?;
+
+        // private globals
+        for (i, global) in self.globals.iter().enumerate() {
+            print_global(i, global, output)?;
+        }
 
         // private functions signatures
         for (i, f) in self.funcs.iter().enumerate() {
@@ -243,28 +264,37 @@ impl<'a> ParsedModule<'a> {
 
         // exports
         for Export { name, kind, index } in &self.exports {
-            if kind != &ExternalKind::Func {
-                unimplemented!("only support func exports right now");
+            match kind {
+                ExternalKind::Func => {
+                    let f = self
+                        .funcs
+                        .get(*index as usize - self.num_func_imports)
+                        .expect("valid export");
+
+                    f.print_function_signature(name, output)?;
+                    // function name
+                    write!(output, " {{ return {}(", self.func_names.get(*index))?;
+
+                    // pass params
+                    writeln!(
+                        output,
+                        "{}); }}",
+                        func_type(&f.validator)
+                            .params()
+                            .iter()
+                            .enumerate()
+                            .format_with(", ", |(i, _pty), fmt| {
+                                fmt(&f.local_names.get(i as u32))
+                            })
+                    )?;
+                }
+                ExternalKind::Global => {
+                    // exported as getter
+                    let ty = self.globals[*index as usize].ty.content_type;
+                    writeln!(output, "{ty} {name}() const {{ return {GLOBAL}{index}; }}")?;
+                }
+                _ => unimplemented!("only support func and global exports right now"),
             }
-            let f = self
-                .funcs
-                .get(*index as usize - self.num_func_imports)
-                .expect("valid export");
-
-            f.print_function_signature(name, output)?;
-            // function name
-            write!(output, " {{ return {}(", self.func_names.get(*index))?;
-
-            // pass params
-            writeln!(
-                output,
-                "{}); }}",
-                func_type(&f.validator)
-                    .params()
-                    .iter()
-                    .enumerate()
-                    .format_with(", ", |(i, _pty), fmt| { fmt(&f.local_names.get(i as u32)) })
-            )?;
         }
 
         writeln!(output, "}};")?;
@@ -288,6 +318,22 @@ impl<'a> ParsedModule<'a> {
 
 fn func_type(f: &FuncToValidate<ValidatorResources>) -> &FuncType {
     f.resources.sub_type_at(f.ty).unwrap().unwrap_func()
+}
+
+fn print_global(index: usize, global: &Global, output: &mut impl Write) -> Result<()> {
+    let mut initial_expression = global.init_expr.get_operators_reader();
+
+    let value = match initial_expression.read()? {
+        Operator::I32Const { value } => value.to_string(),
+        Operator::I64Const { value } => value.to_string(),
+        // Todo: Support floats
+        op => bail!("unimplemented: global initializer {op:?}"),
+    };
+
+    let mutability = if global.ty.mutable { "" } else { "const " };
+    let ty = global.ty.content_type;
+    writeln!(output, "{mutability}{ty} {GLOBAL}{index} = {value};")?;
+    Ok(())
 }
 
 impl<'a> ParsedFunc<'a> {

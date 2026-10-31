@@ -9,7 +9,7 @@ br_if.wast error: operator BrIf unimplemented.
 br_table.wast error: operator BrTable unimplemented.
 break-drop.wast error: operator Br unimplemented.
 call.wast error: operator F32Const unimplemented.
-call_indirect.wast error: operator F32Const unimplemented.
+call_indirect.wast error: unimplemented: global initializer F64Const { value: Ieee64(4621819117588971520) }.
 comments.wast: 4/4 tests passed.
 const.wast error: operator F32Const unimplemented.
 conversions.wast error: operator LocalGet unimplemented.
@@ -32,11 +32,11 @@ float_misc.wast error: operator LocalGet unimplemented.
 forward.wast error: operator LocalGet unimplemented.
 func.wast error: operator Unreachable unimplemented.
 func_ptrs.wast error: operator LocalGet unimplemented.
-globals.wast error: operator GlobalGet unimplemented.
+globals.wast error: unimplemented: global initializer F32Const { value: Ieee32(3225419776) }.
 i32.wast error: operator LocalGet unimplemented.
 i64.wast error: operator LocalGet unimplemented.
 if.wast error: operator LocalGet unimplemented.
-imports.wast error: unimplemented Global.
+imports.wast error: unimplemented Table.
 inline-module.wast: 1/1 tests passed.
 int_exprs.wast error: operator LocalGet unimplemented.
 int_literals.wast error: operator Return unimplemented.
@@ -66,7 +66,7 @@ token.wast: 0/2 tests passed.
 traps.wast error: operator LocalGet unimplemented.
 type.wast: 1/5 tests passed.
 typecheck.wast: 0/164 tests passed.
-unreachable.wast error: operator Unreachable unimplemented.
+unreachable.wast error: unimplemented: global initializer F32Const { value: Ieee32(0) }.
 unreached-invalid.wast: 0/111 tests passed.
 unwind.wast error: operator Unreachable unimplemented.
 utf8-custom-section-id.wast: 0/176 tests passed.
