@@ -34,13 +34,13 @@ impl<'w, W: Write> ExpressionPrinter<'w, W> {
             I64Const { value } => self.push(value),
             I32Add => self.push(format!("{} + {}", params[0], params[1])),
             Drop => Ok(()),
-            Block { .. } => self.visit_frame(op, params),
+            Block { .. } => self.enter_frame(op, params),
             End => self.visit_end(params, frame),
             op => bail!("operator {} unimplemented", op_name(op)),
         }
     }
 
-    fn visit_frame(&mut self, op: &Operator, params: Params) -> Result<()> {
+    fn enter_frame(&mut self, op: &Operator, params: Params) -> Result<()> {
         match op {
             Operator::Block { .. } => self.cross_frame(&params),
             _ => bail!("frame kind {} unimplemented", op_name(op)),
@@ -72,8 +72,9 @@ impl<'w, W: Write> ExpressionPrinter<'w, W> {
 
     fn push(&mut self, expr: impl Display) -> Result<()> {
         let ty = self.pending.pop().unwrap();
-        let top_of_stack = self.stack.push_mut(Operand(self.push_counter));
-        writeln!(self.out, "{ty} {top_of_stack} = {expr};")?;
+        let operand = Operand(self.push_counter);
+        self.stack.push(operand);
+        writeln!(self.out, "{ty} {operand} = {expr};")?;
         self.push_counter += 1;
 
         Ok(())
