@@ -1,4 +1,5 @@
 seven.wast: 2/2 tests passed.
+simple-globals.wast: 19/19 tests passed.
 address.wast error: operator LocalGet unimplemented.
 align.wast error: operator I32Load8S unimplemented.
 binary-leb128.wast: 25/81 tests passed.
