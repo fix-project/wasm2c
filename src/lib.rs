@@ -13,24 +13,15 @@ pub enum OutputSpec<T: Write> {
 }
 
 impl<T: Write> OutputSpec<T> {
-    pub fn is_unified(&self) -> bool {
-        match self {
-            OutputSpec::Unified(_) => true,
-            OutputSpec::Split { .. } => false,
-        }
-    }
-
     pub fn header(&mut self) -> &mut T {
         match self {
-            OutputSpec::Unified(hh) => hh,
-            OutputSpec::Split { hh, .. } => hh,
+            OutputSpec::Unified(hh) | OutputSpec::Split { hh, .. } => hh,
         }
     }
 
     pub fn body(&mut self) -> &mut T {
         match self {
-            OutputSpec::Unified(hh) => hh,
-            OutputSpec::Split { cc, .. } => cc,
+            OutputSpec::Unified(cc) | OutputSpec::Split { cc, .. } => cc,
         }
     }
 }
