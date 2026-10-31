@@ -34,13 +34,13 @@ impl<'w, W: Write> ExpressionPrinter<'w, W> {
             I64Const { value } => self.push(value),
             I32Add => self.push(format!("{} + {}", params[0], params[1])),
             Drop => Ok(()),
-            Block { .. } => self.visit_block(op, params),
+            Block { .. } => self.visit_frame(op, params),
             End => self.visit_end(params, frame),
             op => bail!("operator {} unimplemented", op_name(op)),
         }
     }
 
-    fn visit_block(&mut self, op: &Operator, params: Params) -> Result<()> {
+    fn visit_frame(&mut self, op: &Operator, params: Params) -> Result<()> {
         match op {
             Operator::Block { .. } => self.cross_frame(&params),
             _ => bail!("frame kind {} unimplemented", op_name(op)),
@@ -103,8 +103,8 @@ impl<'w, W: Write> ExpressionPrinter<'w, W> {
         let num_results: usize = num_results.try_into().unwrap();
         let frame = validator.get_control_frame(0).copied().expect("frame");
 
-        // TODO: handle stack polymorphism in unreachable code
-        let params = (0..num_params).map(|_| self.stack.pop().unwrap()).collect();
+        let split = self.stack.len() - num_params; // TODO: stack polymorphism in unreachable code
+        let params: Params = self.stack.drain(split..).collect();
 
         // validate the operator
         validator.op(offset, op)?;
@@ -133,11 +133,7 @@ impl<'w, W: Write> ExpressionPrinter<'w, W> {
         match self.stack.as_slice() {
             [] => {} // no need to do anything at the end of the function
             [param] => writeln!(self.out, "return {};", param)?,
-            params => writeln!(
-                self.out,
-                "return {{{}}};",
-                params.iter().rev().map(ToString::to_string).format(", ")
-            )?,
+            params => writeln!(self.out, "return {{{}}};", params.iter().format(", "))?,
         }
         Ok(())
     }
