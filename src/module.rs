@@ -2,19 +2,20 @@ use crate::{OutputSpec, operators::ExpressionPrinter};
 use anyhow::{Result, bail};
 use convert_case::ccase;
 use itertools::Itertools;
-use std::{collections::HashMap, io::Write, mem};
+use std::{collections::HashMap, io::Write, mem::take};
 use wasmparser::{
-    Export, ExternalKind, FuncToValidate, FuncType, FuncValidatorAllocations, FunctionBody, Import,
-    Imports, KnownCustom, Name, Parser, Payload, TypeRef, ValType, ValidPayload, Validator,
-    ValidatorResources, WasmModuleResources,
+    CustomSectionReader, Export, ExternalKind, FuncToValidate, FuncType, FuncValidatorAllocations,
+    FunctionBody, Import, Imports, KnownCustom, Name, NameMap, Naming, Parser, Payload,
+    SectionLimited, TypeRef, ValType, ValidPayload, Validator, ValidatorResources,
+    WasmModuleResources,
 };
 
 /* STRING CONSTANTS */
 static W2CC: &str = "w2cc_";
 
 pub fn wasm2c<U: Write>(name: &str, wasm: &[u8], output: &mut OutputSpec<U>) -> Result<String> {
-    print_header_includes(&mut output.header())?;
-    print_typedefs(&mut output.header())?;
+    print_header_includes(output.header())?;
+    print_typedefs(output.header())?;
 
     if let OutputSpec::Split { hh_include, cc, .. } = output {
         writeln!(cc, "#include \"{hh_include}\"")?;
@@ -22,14 +23,14 @@ pub fn wasm2c<U: Write>(name: &str, wasm: &[u8], output: &mut OutputSpec<U>) -> 
 
     let class_name = format!("{W2CC}{}", ccase!(snake, name));
 
-    let module = ParsedModule::new(wasm)?;
+    let module = Module::new(wasm)?;
 
     // PRINT class declarations (header)
-    module.print_module_declaration(&class_name, &mut output.header())?;
+    module.print_declaration(&class_name, output.header())?;
 
     // PRINT function definitions (body)
-    print_source_includes(&mut output.body())?;
-    module.print_function_definitions(&class_name, &mut output.body())?;
+    print_source_includes(output.body())?;
+    module.into_function_definitions(&class_name, output.body())?;
 
     Ok(class_name)
 }
@@ -74,168 +75,135 @@ fn print_typedefs(out: &mut impl Write) -> Result<()> {
 // TODO: handle valid names in wat / wasm but invalid in c++ (need mangling, currently issue #22)
 
 // stolen from wasmprinter
-struct NamingMap<K>(HashMap<u32, String>, std::marker::PhantomData<K>);
+pub struct NamingMap {
+    names: HashMap<u32, String>,
+    prefix: &'static str,
+}
 
-impl<K> Default for NamingMap<K> {
-    fn default() -> Self {
-        NamingMap(HashMap::new(), std::marker::PhantomData)
+impl NamingMap {
+    fn new(prefix: &'static str) -> Self {
+        Self {
+            names: Default::default(),
+            prefix,
+        }
+    }
+
+    pub fn get(&self, key: u32) -> String {
+        self.names
+            .get(&key)
+            .cloned()
+            .unwrap_or_else(|| format!("{}{key}", self.prefix))
+    }
+
+    fn read(&mut self, map: NameMap<'_>) -> Result<()> {
+        for naming in map {
+            let Naming { index, name } = naming?;
+            self.names.insert(index, name.to_owned());
+        }
+        Ok(())
     }
 }
 
-impl<K: NamingNamespace> NamingMap<K> {
-    fn get(&self, key: u32) -> String {
-        if let Some(name) = self.0.get(&key) {
-            return name.clone();
-        }
-        format!("{}{key}", K::desc())
-    }
-}
+pub struct Module<'a> {
+    pub func_names: NamingMap,
 
-/// Helper trait for the `NamingMap` type's `K` type parameter.
-trait NamingNamespace {
-    fn desc() -> &'static str;
-}
-
-macro_rules! naming_namespaces {
-    ($(struct $name:ident => $desc:tt)*) => ($(
-        struct $name;
-
-        impl NamingNamespace for $name {
-            fn desc() -> &'static str { $desc }
-        }
-    )*)
-}
-
-naming_namespaces! {
-    struct NameFunc => "func"
-    struct NameLocal => "local"
-}
-
-struct ParsedModule<'a> {
     exports: Vec<Export<'a>>,
-    funcs: Vec<ParsedFunc<'a>>,
-    func_names: NamingMap<NameFunc>,
-    num_func_imports: usize,
+    funcs: Vec<Func<'a>>,
+
+    num_func_imports: u32,
 }
 
-struct ParsedFunc<'a> {
-    validator: FuncToValidate<ValidatorResources>,
+struct Func<'a> {
+    func: FuncToValidate<ValidatorResources>,
     body: FunctionBody<'a>,
-    local_names: NamingMap<NameLocal>,
+    local_names: NamingMap,
 }
 
-impl<'a> ParsedModule<'a> {
+impl<'a> Module<'a> {
     // pass to collect function bodies, function names, and local / param names only
     fn new(wasm: &'a [u8]) -> Result<Self> {
         let mut validator = Validator::new();
-
-        let mut exports = Vec::new();
-        let mut funcs = Vec::new();
-        let mut func_names = NamingMap::default();
-        let mut num_func_imports = 0;
+        let mut module = Module {
+            func_names: NamingMap::new("func"),
+            exports: Vec::new(),
+            funcs: Vec::new(),
+            num_func_imports: 0,
+        };
 
         for payload in Parser::new(0).parse_all(wasm) {
             let payload = payload?;
             match validator.payload(&payload)? {
-                ValidPayload::Func(validator, body) => funcs.push(ParsedFunc {
-                    validator,
-                    body,
-                    local_names: Default::default(),
-                }),
-                ValidPayload::Ok => {
-                    match payload {
-                        Payload::ExportSection(reader) => {
-                            for export in reader {
-                                let export = export?;
-                                match export.kind {
-                                    ExternalKind::Func
-                                        if (export.index as usize) < num_func_imports =>
-                                    {
-                                        bail!("unimplemented: export of function import")
-                                    }
-                                    ExternalKind::Func => {
-                                        exports.push(export);
-                                    }
-                                    _ => bail!("unimplemented {:?}", export.kind),
-                                }
-                            }
-                        }
-                        Payload::ImportSection(reader) => {
-                            for import in reader {
-                                match import? {
-                                    Imports::Single(
-                                        _,
-                                        Import {
-                                            ty: TypeRef::Func { .. },
-                                            ..
-                                        },
-                                    ) => num_func_imports += 1,
-                                    Imports::Single(_, _) => {} // TODO: other kinds of imports,
-                                    Imports::Compact1 { .. } | Imports::Compact2 { .. } => {
-                                        bail!("unimplemented: compact imports")
-                                    }
-                                }
-                            }
-                        }
-                        Payload::CustomSection(reader) => {
-                            // custom section > name section
-                            if let KnownCustom::Name(reader) = reader.as_known() {
-                                for subsection in reader {
-                                    match subsection? {
-                                        // custom sect > name sect > function names
-                                        Name::Function(map) => {
-                                            for naming in map {
-                                                let naming = naming?;
-                                                func_names
-                                                    .0
-                                                    .insert(naming.index, naming.name.to_string());
-                                            }
-                                        }
-                                        // custom sect > name sect > local names per function
-                                        Name::Local(map) => {
-                                            for func in map {
-                                                let func = func?;
-                                                for naming in func.names {
-                                                    let naming = naming?;
-                                                    funcs
-                                                        .get_mut(func.index as usize)
-                                                        .expect("func index in range")
-                                                        .local_names
-                                                        .0
-                                                        .insert(
-                                                            naming.index,
-                                                            naming.name.to_string(),
-                                                        );
-                                                }
-                                            }
-                                        }
-                                        _ => {}
-                                    }
-                                }
-                            }
-                        }
-                        _ => {}
-                    }
+                ValidPayload::Func(func, body) => {
+                    module.funcs.push(Func {
+                        func,
+                        body,
+                        local_names: NamingMap::new("local"),
+                    });
+                    continue;
                 }
+                ValidPayload::Ok => {}
                 ValidPayload::Parser(_) => unimplemented!("component model"),
                 ValidPayload::End(_) => break,
             }
+            match payload {
+                Payload::ExportSection(reader) => {
+                    module.exports = reader.into_iter().collect::<Result<_, _>>()?
+                }
+                Payload::ImportSection(reader) => module.read_imports(reader)?,
+                Payload::CustomSection(reader) => module.read_custom(reader)?,
+                _ => {}
+            }
         }
-
-        Ok(ParsedModule {
-            exports,
-            funcs,
-            func_names,
-            num_func_imports,
-        })
+        Ok(module)
     }
 
-    fn print_module_declaration(&self, class_name: &str, output: &mut impl Write) -> Result<()> {
+    fn read_imports(&mut self, reader: SectionLimited<'_, Imports<'_>>) -> Result<()> {
+        for import in reader {
+            match import? {
+                Imports::Single(_, Import { ty, .. }) => match ty {
+                    TypeRef::Func { .. } => self.num_func_imports += 1, // TODO: actually use import,
+                    _ => bail!("unimplemented import kind: {ty:?}"),
+                },
+                Imports::Compact1 { .. } | Imports::Compact2 { .. } => {
+                    bail!("unimplemented: compact imports")
+                }
+            }
+        }
+        Ok(())
+    }
+
+    fn read_custom(&mut self, reader: CustomSectionReader<'_>) -> Result<()> {
+        let KnownCustom::Name(reader) = reader.as_known() else {
+            return Ok(());
+        };
+        for subsection in reader {
+            match subsection? {
+                Name::Function(map) => self.func_names.read(map)?,
+                Name::Local(map) => {
+                    for func in map {
+                        let func = func?;
+                        let Some(i) = func.index.checked_sub(self.num_func_imports) else {
+                            bail!("local names for imported function");
+                        };
+                        self.funcs
+                            .get_mut(i as usize)
+                            .expect("func index in range")
+                            .local_names
+                            .read(func.names)?;
+                    }
+                }
+                _ => {}
+            }
+        }
+        Ok(())
+    }
+
+    fn print_declaration(&self, class_name: &str, output: &mut impl Write) -> Result<()> {
         writeln!(output, "class {class_name} {{")?;
 
         // private functions signatures
-        for (i, f) in self.funcs.iter().enumerate() {
-            f.print_function_signature(&self.func_names.get(i as u32), output)?;
+        for (index, f) in (self.num_func_imports..).zip(&self.funcs) {
+            f.print_signature(&self.func_names.get(index), output)?;
             writeln!(output, ";")?;
         }
 
@@ -243,57 +211,51 @@ impl<'a> ParsedModule<'a> {
 
         // exports
         for Export { name, kind, index } in &self.exports {
-            if kind != &ExternalKind::Func {
-                unimplemented!("only support func exports right now");
+            match kind {
+                ExternalKind::Func => {
+                    let Some(raw_index) = index.checked_sub(self.num_func_imports) else {
+                        bail!("unsupported: export of func import");
+                    };
+
+                    let f = self.funcs.get(raw_index as usize).expect("valid export");
+                    f.print_signature(name, output)?;
+                    write!(output, " {{ return {}(", self.func_names.get(*index))?;
+                    writeln!(
+                        output,
+                        "{}); }}",
+                        (0..f.ty().params().len())
+                            .format_with(", ", |i, fmt| { fmt(&f.local_names.get(i as u32)) })
+                    )?;
+                }
+                _ => bail!("unimplemented export kind: {kind:?}"),
             }
-            let f = self
-                .funcs
-                .get(*index as usize - self.num_func_imports)
-                .expect("valid export");
-
-            f.print_function_signature(name, output)?;
-            // function name
-            write!(output, " {{ return {}(", self.func_names.get(*index))?;
-
-            // pass params
-            writeln!(
-                output,
-                "{}); }}",
-                func_type(&f.validator)
-                    .params()
-                    .iter()
-                    .enumerate()
-                    .format_with(", ", |(i, _pty), fmt| { fmt(&f.local_names.get(i as u32)) })
-            )?;
         }
 
         writeln!(output, "}};")?;
         Ok(())
     }
 
-    fn print_function_definitions(self, class_name: &str, output: &mut impl Write) -> Result<()> {
+    fn into_function_definitions(
+        mut self,
+        class_name: &str,
+        output: &mut impl Write,
+    ) -> Result<()> {
         let mut allocs = FuncValidatorAllocations::default();
-        for (i, f) in self.funcs.into_iter().enumerate() {
-            let name = self.func_names.get(i as u32);
-            f.print_function_signature(&format!("{class_name}::{name}"), output)?;
+        for (index, f) in (self.num_func_imports..).zip(take(&mut self.funcs)) {
+            let name = self.func_names.get(index);
+            f.print_signature(&format!("{class_name}::{name}"), output)?;
             writeln!(output, " {{")?;
-
-            allocs = f.print_function_body(mem::take(&mut allocs), output)?;
-
+            allocs = f.print_body(take(&mut allocs), output)?;
             writeln!(output, "}}")?;
         }
         Ok(())
     }
 }
 
-fn func_type(f: &FuncToValidate<ValidatorResources>) -> &FuncType {
-    f.resources.sub_type_at(f.ty).unwrap().unwrap_func()
-}
-
-impl<'a> ParsedFunc<'a> {
-    fn print_function_signature(&self, name: &str, output: &mut impl Write) -> Result<()> {
-        let ty = func_type(&self.validator);
-        match &ty.results() {
+impl<'a> Func<'a> {
+    fn print_signature(&self, name: &str, output: &mut impl Write) -> Result<()> {
+        let ty = self.ty();
+        match ty.results() {
             [] => write!(output, "void")?,
             [vty] => write!(output, "{}", vty)?,
             vtys => write!(output, "std::tuple<{}>", vtys.iter().format(", "))?,
@@ -315,19 +277,19 @@ impl<'a> ParsedFunc<'a> {
         write!(output, ")")?;
         Ok(())
     }
-    fn print_function_body(
+
+    fn print_body(
         self,
         allocs: FuncValidatorAllocations,
         output: &mut impl Write,
     ) -> Result<FuncValidatorAllocations> {
-        let ParsedFunc {
-            validator,
+        let Func {
+            func,
             body,
             local_names,
         } = self;
         let mut reader = body.get_binary_reader();
-
-        let mut f = validator.into_validator(allocs);
+        let mut f = func.into_validator(allocs);
 
         let num_params = f.len_locals();
         f.read_locals(&mut reader)?;
@@ -343,10 +305,21 @@ impl<'a> ParsedFunc<'a> {
         }
 
         let mut printer = ExpressionPrinter::new(output);
+        let mut reader = body.get_operators_reader()?;
         while !reader.eof() {
-            reader.visit_operator(&mut printer.visitor(&mut f, reader.original_position()))??;
+            let (op, offset) = reader.read_with_offset()?;
+            printer.op(&mut f, &op, offset)?;
         }
-        reader.finish_expression(&printer.visitor(&mut f, reader.original_position()))?;
+        reader.finish()?;
+        printer.finish()?;
         Ok(f.into_allocations())
+    }
+
+    fn ty(&self) -> &FuncType {
+        self.func
+            .resources
+            .sub_type_at(self.func.ty)
+            .unwrap()
+            .unwrap_func()
     }
 }

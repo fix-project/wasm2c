@@ -36,7 +36,7 @@ globals.wast error: operator GlobalGet unimplemented.
 i32.wast error: operator LocalGet unimplemented.
 i64.wast error: operator LocalGet unimplemented.
 if.wast error: operator LocalGet unimplemented.
-imports.wast error: unimplemented Global.
+imports.wast error: unimplemented export kind: Global.
 inline-module.wast: 1/1 tests passed.
 int_exprs.wast error: operator LocalGet unimplemented.
 int_literals.wast error: operator Return unimplemented.
