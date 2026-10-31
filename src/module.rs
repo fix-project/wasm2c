@@ -316,7 +316,6 @@ impl<'a> Func<'a> {
             local_names,
         } = self;
         let mut reader = body.get_binary_reader();
-
         let mut f = func.into_validator(allocs);
 
         let num_params = f.len_locals();
@@ -333,10 +332,12 @@ impl<'a> Func<'a> {
         }
 
         let mut printer = ExpressionPrinter::new(output);
+        let mut reader = body.get_operators_reader()?;
         while !reader.eof() {
-            reader.visit_operator(&mut printer.visitor(&mut f, reader.original_position()))??;
+            let (op, offset) = reader.read_with_offset()?;
+            printer.op(&mut f, &op, offset)?;
         }
-        reader.finish_expression(&printer.visitor(&mut f, reader.original_position()))?;
+        reader.finish()?;
         printer.finish()?;
         Ok(f.into_allocations())
     }
