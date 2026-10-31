@@ -61,16 +61,24 @@ pub fn wast2c<U: Write>(
                 last_module_instance_name = Some(instance_name);
             }
             WastDirective::AssertReturn {
-                exec:
+                exec,
+                results,
+                span,
+            } => {
+                let (name, args) = match exec {
                     WastExecute::Invoke(WastInvoke {
                         span: _,
                         module: None,
                         name,
                         args,
-                    }),
-                results,
-                span,
-            } => {
+                    }) => (name, args),
+                    WastExecute::Get {
+                        span: _,
+                        module: None,
+                        global,
+                    } => (global, vec![]),
+                    _ => continue,
+                };
                 let line_no = span.linecol_in(text).0;
 
                 let inst = last_module_instance_name.as_ref().expect("previous module");
@@ -86,29 +94,27 @@ pub fn wast2c<U: Write>(
                     )?,
                 };
 
-                writeln!(
-                    cc,
-                    "auto actual = {inst}.{name}({});",
-                    args.iter().map(arg_value).format(", ")
-                )?;
+                let call = format!("{inst}.{name}({})", args.iter().map(arg_value).format(", "));
 
                 if results.is_empty() {
                     writedoc!(
                         cc,
-                        "static_assert(std::is_same_v<void, decltype(actual)>);
+                        "static_assert(std::is_same_v<void, decltype({call})>);
+                         {call};
                          g_success_count++;\n"
                     )?;
                 } else {
                     writedoc!(
                         cc,
-                        "static_assert(std::is_same_v<decltype(expected), decltype(actual)>);
+                        "auto actual = {call};
+                         static_assert(std::is_same_v<decltype(expected), decltype(actual)>);
                          assert_eq(expected, actual, {line_no});\n"
                     )?;
                 }
 
                 writeln!(cc, "}}")?;
             }
-            _ => {} // XXX ignore for now
+            _ => {}
         }
     }
 

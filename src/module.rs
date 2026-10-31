@@ -5,7 +5,7 @@ use itertools::Itertools;
 use std::{collections::HashMap, io::Write, mem::take};
 use wasmparser::{
     CustomSectionReader, Export, ExternalKind, FuncToValidate, FuncType, FuncValidatorAllocations,
-    FunctionBody, Import, Imports, KnownCustom, Name, NameMap, Naming, Parser, Payload,
+    FunctionBody, Global, Import, Imports, KnownCustom, Name, NameMap, Naming, Parser, Payload,
     SectionLimited, TypeRef, ValType, ValidPayload, Validator, ValidatorResources,
     WasmModuleResources,
 };
@@ -106,11 +106,14 @@ impl NamingMap {
 
 pub struct Module<'a> {
     pub func_names: NamingMap,
+    pub global_names: NamingMap,
 
-    exports: Vec<Export<'a>>,
     funcs: Vec<Func<'a>>,
+    globals: Vec<Global<'a>>,
+    exports: Vec<Export<'a>>,
 
     num_func_imports: u32,
+    num_global_imports: u32,
 }
 
 struct Func<'a> {
@@ -125,9 +128,12 @@ impl<'a> Module<'a> {
         let mut validator = Validator::new();
         let mut module = Module {
             func_names: NamingMap::new("func"),
-            exports: Vec::new(),
+            global_names: NamingMap::new("global"),
             funcs: Vec::new(),
+            globals: Vec::new(),
+            exports: Vec::new(),
             num_func_imports: 0,
+            num_global_imports: 0,
         };
 
         for payload in Parser::new(0).parse_all(wasm) {
@@ -146,6 +152,9 @@ impl<'a> Module<'a> {
                 ValidPayload::End(_) => break,
             }
             match payload {
+                Payload::GlobalSection(reader) => {
+                    module.globals = reader.into_iter().collect::<Result<_, _>>()?
+                }
                 Payload::ExportSection(reader) => {
                     module.exports = reader.into_iter().collect::<Result<_, _>>()?
                 }
@@ -162,6 +171,7 @@ impl<'a> Module<'a> {
             match import? {
                 Imports::Single(_, Import { ty, .. }) => match ty {
                     TypeRef::Func { .. } => self.num_func_imports += 1, // TODO: actually use import,
+                    TypeRef::Global { .. } => self.num_global_imports += 1, // TODO: actually use import,
                     _ => bail!("unimplemented import kind: {ty:?}"),
                 },
                 Imports::Compact1 { .. } | Imports::Compact2 { .. } => {
@@ -179,6 +189,7 @@ impl<'a> Module<'a> {
         for subsection in reader {
             match subsection? {
                 Name::Function(map) => self.func_names.read(map)?,
+                Name::Global(map) => self.global_names.read(map)?,
                 Name::Local(map) => {
                     for func in map {
                         let func = func?;
@@ -200,6 +211,11 @@ impl<'a> Module<'a> {
 
     fn print_declaration(&self, class_name: &str, output: &mut impl Write) -> Result<()> {
         writeln!(output, "class {class_name} {{")?;
+
+        // private globals
+        for (index, g) in (self.num_global_imports..).zip(&self.globals) {
+            self.print_global(index, g, output)?;
+        }
 
         // private functions signatures
         for (index, f) in (self.num_func_imports..).zip(&self.funcs) {
@@ -227,6 +243,16 @@ impl<'a> Module<'a> {
                             .format_with(", ", |i, fmt| { fmt(&f.local_names.get(i as u32)) })
                     )?;
                 }
+                ExternalKind::Global => {
+                    let Some(raw_index) = index.checked_sub(self.num_global_imports) else {
+                        bail!("unsupported: export of global import");
+                    };
+                    // exported as getter
+                    let ty = self.globals[raw_index as usize].ty.content_type;
+                    let global_name = self.global_names.get(*index);
+                    writeln!(output, "{ty} {name}() const {{ return {global_name}; }}",)?;
+                }
+
                 _ => bail!("unimplemented export kind: {kind:?}"),
             }
         }
@@ -245,9 +271,31 @@ impl<'a> Module<'a> {
             let name = self.func_names.get(index);
             f.print_signature(&format!("{class_name}::{name}"), output)?;
             writeln!(output, " {{")?;
-            allocs = f.print_body(take(&mut allocs), output)?;
+            allocs = f.print_body(&self, take(&mut allocs), output)?;
             writeln!(output, "}}")?;
         }
+        Ok(())
+    }
+
+    fn print_global(&self, index: u32, global: &Global<'_>, output: &mut impl Write) -> Result<()> {
+        use wasmparser::Operator::*;
+
+        let name = self.global_names.get(index);
+        let mut initial_expression = global.init_expr.get_operators_reader();
+
+        let value = match initial_expression.read()? {
+            I32Const { value } => value.to_string(),
+            I64Const { value } => value.to_string(),
+            // Todo: Support floats
+            op => bail!("unimplemented: global initializer {op:?}"),
+        };
+
+        if !initial_expression.is_end_then_eof() {
+            bail!("unimplemented: extended constant expressions");
+        }
+
+        let ty = global.ty.content_type;
+        writeln!(output, "{ty} {name} = {value};")?;
         Ok(())
     }
 }
@@ -280,6 +328,7 @@ impl<'a> Func<'a> {
 
     fn print_body(
         self,
+        module: &Module,
         allocs: FuncValidatorAllocations,
         output: &mut impl Write,
     ) -> Result<FuncValidatorAllocations> {
@@ -304,7 +353,7 @@ impl<'a> Func<'a> {
             writeln!(output, "{ty} {}{{}};", local_names.get(i))?;
         }
 
-        let mut printer = ExpressionPrinter::new(output);
+        let mut printer = ExpressionPrinter::new(module, output);
         let mut reader = body.get_operators_reader()?;
         while !reader.eof() {
             let (op, offset) = reader.read_with_offset()?;
