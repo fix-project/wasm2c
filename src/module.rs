@@ -96,7 +96,7 @@ impl NamingMap {
 }
 
 struct Module<'a> {
-    func_exports: Vec<(&'a str, u32)>,
+    exports: Vec<Export<'a>>,
     funcs: Vec<Func<'a>>,
     func_names: NamingMap,
     num_func_imports: u32,
@@ -113,7 +113,7 @@ impl<'a> Module<'a> {
     fn new(wasm: &'a [u8]) -> Result<Self> {
         let mut validator = Validator::new();
         let mut module = Module {
-            func_exports: Vec::new(),
+            exports: Vec::new(),
             funcs: Vec::new(),
             func_names: NamingMap::new("func"),
             num_func_imports: 0,
@@ -146,17 +146,7 @@ impl<'a> Module<'a> {
 
     fn read_exports(&mut self, reader: SectionLimited<'a, Export<'a>>) -> Result<()> {
         for export in reader {
-            let export = export?;
-            if export.kind != ExternalKind::Func {
-                bail!("unimplemented: {:?} export", export.kind);
-            }
-            let Some(idx) = export.index.checked_sub(self.num_func_imports) else {
-                bail!("unimplemented: export of func import");
-            };
-            match export.kind {
-                ExternalKind::Func => self.func_exports.push((export.name, idx)),
-                _ => bail!("unimplemented {:?}", export.kind),
-            }
+            self.exports.push(export?);
         }
         Ok(())
     }
@@ -234,20 +224,25 @@ impl<'a> Module<'a> {
         writeln!(output, "\npublic:")?;
 
         // exports
-        for (name, raw_index) in &self.func_exports {
-            let f = self.funcs.get(*raw_index as usize).expect("valid export");
+        for Export { name, kind, index } in &self.exports {
+            match kind {
+                ExternalKind::Func => {
+                    let Some(raw_index) = index.checked_sub(self.num_func_imports) else {
+                        bail!("unsupported: export of func import");
+                    };
 
-            f.print_signature(name, output)?;
-            // function name
-            write!(output, " {{ return {}(", self.func_names.get(*raw_index))?;
-
-            // pass params
-            writeln!(
-                output,
-                "{}); }}",
-                (0..f.ty().params().len())
-                    .format_with(", ", |i, fmt| { fmt(&f.local_names.get(i as u32)) })
-            )?;
+                    let f = self.funcs.get(raw_index as usize).expect("valid export");
+                    f.print_signature(name, output)?;
+                    write!(output, " {{ return {}(", self.func_names.get(*index))?;
+                    writeln!(
+                        output,
+                        "{}); }}",
+                        (0..f.ty().params().len())
+                            .format_with(", ", |i, fmt| { fmt(&f.local_names.get(i as u32)) })
+                    )?;
+                }
+                _ => bail!("unimplemented export kind: {kind:?}"),
+            }
         }
 
         writeln!(output, "}};")?;
