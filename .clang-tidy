@@ -1,0 +1,3 @@
+Checks: '*,-llvmlibc-*,-llvm-prefer-static-over-anonymous-namespace,-modernize-use-trailing-return-type,-fuchsia-default-arguments-calls,-google-build-using-namespace,-fuchsia-overloaded-operator'
+
+WarningsAsErrors: '*'

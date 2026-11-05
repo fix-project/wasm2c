@@ -2,8 +2,7 @@ use crate::{OutputSpec, wasm2c};
 use anyhow::{Result, bail};
 use indoc::writedoc;
 use itertools::Itertools;
-use std::fmt::Display;
-use std::io::Write;
+use std::{fmt::Display, io::Write};
 use wast::core::{WastArgCore, WastRetCore};
 use wast::lexer::Lexer;
 use wast::parser::{self, ParseBuffer};
@@ -28,10 +27,10 @@ pub fn wast2c<U: Write>(
     let mut last_module_instance_name = None;
 
     // write preamble
+    print_includes(cc)?;
     writedoc!(
         cc,
         "#include \"{hh_include}\"
-         #include <print>
 
          unsigned int g_success_count;
 
@@ -138,4 +137,12 @@ fn ret_value(ret: &WastRet<'_>) -> impl Display {
         WastRet::Core(WastRetCore::I64(v)) => write!(f, "i64({v})"),
         _ => unimplemented!("wast ret"),
     })
+}
+
+pub(crate) fn print_includes(out: &mut impl Write) -> Result<()> {
+    let script_includes = ["print"];
+    for inc in script_includes {
+        writeln!(out, "#include <{}>", inc)?;
+    }
+    Ok(())
 }
