@@ -157,17 +157,14 @@ public:
 
 class ForbidOutputBackend : public vfs::OutputBackend
 {
+protected:
   Expected<std::unique_ptr<vfs::OutputFileImpl>> createFileImpl( StringRef path,
                                                                  std::optional<vfs::OutputConfig> config
                                                                  [[maybe_unused]] ) override
-  {
-    return createStringError( inconvertibleErrorCode(), "attempt to create output where forbidden: " + path.str() );
-  }
+  { return createStringError( inconvertibleErrorCode(), "forbidden attempt to create file: " + path.str() ); }
 
   IntrusiveRefCntPtr<vfs::OutputBackend> cloneImpl() const override
-  {
-    return makeIntrusiveRefCnt<ForbidOutputBackend>();
-  }
+  { return makeIntrusiveRefCnt<ForbidOutputBackend>(); }
 };
 
 class MemoryOutputBackend : public vfs::OutputBackend
@@ -175,10 +172,9 @@ class MemoryOutputBackend : public vfs::OutputBackend
   std::string path_;
   std::unique_ptr<MemoryBuffer>* destination_;
 
+protected:
   IntrusiveRefCntPtr<vfs::OutputBackend> cloneImpl() const override
-  {
-    return makeIntrusiveRefCnt<MemoryOutputBackend>( path_, *destination_ );
-  }
+  { return makeIntrusiveRefCnt<MemoryOutputBackend>( path_, *destination_ ); }
 
   Expected<std::unique_ptr<vfs::OutputFileImpl>> createFileImpl( StringRef path,
                                                                  std::optional<vfs::OutputConfig> config
@@ -239,9 +235,7 @@ public:
 
   [[nodiscard]] const std::string& includes() const { return includes_; }
   [[nodiscard]] std::unique_ptr<MemoryBuffer> dup() const
-  {
-    return MemoryBuffer::getMemBuffer( pch_->getMemBufferRef(), false );
-  }
+  { return MemoryBuffer::getMemBuffer( pch_->getMemBufferRef(), false ); }
 };
 
 // RAII wrapper for JIT engine
