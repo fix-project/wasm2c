@@ -35,7 +35,7 @@ pub fn wasm2c<U: Write>(name: &str, wasm: &[u8], output: &mut OutputSpec<U>) -> 
     Ok(class_name)
 }
 
-fn print_header_includes(out: &mut impl Write) -> Result<()> {
+pub(crate) fn print_header_includes(out: &mut impl Write) -> Result<()> {
     writeln!(out, "#pragma once")?;
     writeln!(out)?;
 
@@ -47,7 +47,7 @@ fn print_header_includes(out: &mut impl Write) -> Result<()> {
     Ok(())
 }
 
-fn print_source_includes(out: &mut impl Write) -> Result<()> {
+pub(crate) fn print_source_includes(out: &mut impl Write) -> Result<()> {
     let source_includes = [""; 0]; // no source includes yet
     for inc in source_includes {
         writeln!(out, "#include <{}>", inc)?;
@@ -284,8 +284,8 @@ impl<'a> Module<'a> {
         let mut initial_expression = global.init_expr.get_operators_reader();
 
         let value = match initial_expression.read()? {
-            I32Const { value } => value.to_string(),
-            I64Const { value } => value.to_string(),
+            I32Const { value } => format!("static_cast<i32>({value})"),
+            I64Const { value } => format!("static_cast<i64>({value})"),
             // Todo: Support floats
             op => bail!("unimplemented: global initializer {op:?}"),
         };

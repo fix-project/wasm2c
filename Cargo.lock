@@ -1655,7 +1655,9 @@ dependencies = [
  "cc",
  "clap",
  "clio",
+ "itertools",
  "rayon",
+ "serde_json",
  "walkdir",
  "wasm2c",
 ]

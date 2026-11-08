@@ -18,9 +18,15 @@ jobs:
         run: |
           rustup update stable
           rustup component add rustfmt --toolchain stable
+      - name: Install clang-format 22
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y clang-format-22
       - name: Check formatting
-        run: cargo fmt --all -- --check
-  
+        run: |
+          cargo fmt --all -- --check
+          clang-format-22 -i ./wast2c-jit/src/jit.cc
+          git diff --exit-code
   clippy:
     runs-on: ubuntu-26.04
     steps:
@@ -38,9 +44,12 @@ jobs:
             llvm-22-dev \
             clang-22 \
             libclang-22-dev \
-            libclang-cpp22-dev
+            libclang-cpp22-dev \
+            clang-tidy-22
       - name: Run clippy
-        run: cargo clippy --locked --all -- -D warnings
+        run: |
+          cargo clippy --locked --all -- -D warnings
+          clang-tidy-22 -p target ./wast2c-jit/src/jit.cc
 
   build:
     runs-on: ubuntu-26.04

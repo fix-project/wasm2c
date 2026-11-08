@@ -1,17 +1,13 @@
 mod jit;
 
-use crate::jit::run;
+use crate::jit::{init, run};
 use anyhow::{Result, ensure};
 use clap::Parser;
 use clio::ClioPath;
 use rayon::prelude::*;
-use std::{
-    ffi::OsStr,
-    fs,
-    path::{Path, PathBuf},
-};
+use std::{ffi::OsStr, fs, path::PathBuf};
 use walkdir::WalkDir;
-use wasm2c::{OutputSpec, wast2c};
+use wasm2c::{OutputSpec, print_includes, wast2c};
 
 #[derive(Parser)]
 struct Args {
@@ -28,17 +24,26 @@ fn main() -> Result<()> {
     for path in &args.paths {
         for entry in WalkDir::new(path.as_os_str()).max_depth(1) {
             let entry = entry?;
-            if entry.file_type().is_file()
-                && let Some("wast") = entry.path().extension().and_then(OsStr::to_str)
-            {
-                files.push(entry.into_path());
+            if entry.file_type().is_file() {
+                if matches!(
+                    entry.path().extension().and_then(OsStr::to_str),
+                    Some("wat") | Some("wast")
+                ) {
+                    files.push(entry.into_path());
+                } else {
+                    eprintln!("Skipping {}...", entry.path().display());
+                }
             }
         }
     }
 
     files.sort();
     files.dedup();
-    ensure!(!files.is_empty(), "no .wast files found");
+    ensure!(!files.is_empty(), "no .wat or .wast files found");
+
+    let mut useful_includes = Vec::new();
+    print_includes(&mut useful_includes)?;
+    init(&useful_includes)?;
 
     // 8 MiB stack per thread
     rayon::ThreadPoolBuilder::new()
@@ -46,7 +51,7 @@ fn main() -> Result<()> {
         .build_global()?;
 
     // Collect results in sorted order
-    let reports: Vec<Result<String>> = files.par_iter().map(|file| run_script(file)).collect();
+    let reports: Vec<Result<String>> = files.par_iter().map(run_script).collect();
     for report in reports {
         println!("{}", report?);
     }
@@ -54,13 +59,13 @@ fn main() -> Result<()> {
 }
 
 // Converts one .wast file to C++, JIT-compiles and runs it, and returns summary
-fn run_script(file: &Path) -> Result<String> {
+fn run_script(file: &PathBuf) -> Result<String> {
     let script = fs::read_to_string(file)?;
     let mut header = Vec::new();
     let mut body = Vec::new();
 
     let mut output = OutputSpec::Split {
-        hh_include: String::from("input.hh"),
+        hh_include: String::from("input.hh"), // must match kHeaderPath in jit.cc
         hh: &mut header,
         cc: &mut body,
     };
@@ -71,7 +76,9 @@ fn run_script(file: &Path) -> Result<String> {
 
     match wast2c(&script, &mut output, allow_confusing_unicode) {
         Ok(num_directives) => {
-            let num_successes = run(&body, &header)?;
+            header.push(0); // NUL-terminate for clang
+            body.push(0);
+            let num_successes = run(&header, &body)?;
             Ok(format!(
                 "{name}: {num_successes}/{num_directives} tests passed."
             ))

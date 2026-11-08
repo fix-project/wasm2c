@@ -1,3 +1,5 @@
+locals.wat: 1/1 tests passed.
+params.wat: 1/1 tests passed.
 seven.wast: 2/2 tests passed.
 simple-globals.wast: 19/19 tests passed.
 address.wast error: operator LocalGet unimplemented.
