@@ -2,8 +2,11 @@
 
 use itertools::Itertools;
 use serde_json::json;
+use std::os::unix::ffi::OsStrExt;
 use std::{
-    env, fs,
+    env,
+    fmt::Write,
+    fs,
     path::{Path, PathBuf},
     process::Command,
 };
@@ -77,6 +80,23 @@ fn write_compile_commands(build: &cc::Build) {
     }
 }
 
+fn c_string_literal(bytes: &[u8]) -> String {
+    let mut out = String::with_capacity(bytes.len() + 2);
+    out.push('"');
+    for &b in bytes {
+        match b {
+            b'"' | b'\\' => {
+                out.push('\\');
+                out.push(b as char);
+            }
+            0x20..=0x7e => out.push(b as char),
+            _ => write!(out, "\\{b:03o}").unwrap(),
+        }
+    }
+    out.push('"');
+    out
+}
+
 fn main() {
     println!("cargo::rerun-if-changed={SOURCE}");
 
@@ -93,7 +113,7 @@ fn main() {
 
     let clang = PathBuf::from(llvm_config("--bindir")).join("clang++");
     let libdir = llvm_config("--libdir");
-    let clang_path = format!("{:?}", clang.display().to_string());
+    let clang_path = c_string_literal(clang.as_os_str().as_bytes());
 
     let mut build = cc::Build::new();
     build
