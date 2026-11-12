@@ -4,14 +4,15 @@ use convert_case::ccase;
 use itertools::Itertools;
 use std::{collections::HashMap, io::Write, mem::take};
 use wasmparser::{
-    CustomSectionReader, Export, ExternalKind, FuncToValidate, FuncType, FuncValidatorAllocations,
-    FunctionBody, Global, Import, Imports, KnownCustom, Name, NameMap, Naming, Parser, Payload,
-    SectionLimited, TypeRef, ValType, ValidPayload, Validator, ValidatorResources,
-    WasmModuleResources,
+    ConstExpr, CustomSectionReader, Data, DataKind, Export, ExternalKind, FuncToValidate, FuncType,
+    FuncValidatorAllocations, FunctionBody, Global, Import, Imports, KnownCustom, MemoryType, Name,
+    NameMap, Naming, Parser, Payload, SectionLimited, TypeRef, ValType, ValidPayload, Validator,
+    ValidatorResources, WasmModuleResources,
 };
 
 /* STRING CONSTANTS */
 static W2CC: &str = "w2cc_";
+static RUNTIME: &str = include_str!("runtime.hh");
 
 pub fn wasm2c<U: Write>(name: &str, wasm: &[u8], output: &mut OutputSpec<U>) -> Result<String> {
     print_header_includes(output.header())?;
@@ -44,6 +45,9 @@ pub(crate) fn print_header_includes(out: &mut impl Write) -> Result<()> {
         writeln!(out, "#include <{}>", inc)?;
     }
     writeln!(out)?;
+
+    // include runtime header for now. TODO: separate runtime header file
+    writeln!(out, "{RUNTIME}")?;
     Ok(())
 }
 
@@ -107,9 +111,12 @@ impl NamingMap {
 pub struct Module<'a> {
     pub func_names: NamingMap,
     pub global_names: NamingMap,
+    pub memory_names: NamingMap,
 
     funcs: Vec<Func<'a>>,
     globals: Vec<Global<'a>>,
+    memories: Vec<MemoryType>,
+    data: Vec<Data<'a>>,
     exports: Vec<Export<'a>>,
 
     num_func_imports: u32,
@@ -129,8 +136,11 @@ impl<'a> Module<'a> {
         let mut module = Module {
             func_names: NamingMap::new("func"),
             global_names: NamingMap::new("global"),
+            memory_names: NamingMap::new("memory"),
             funcs: Vec::new(),
             globals: Vec::new(),
+            memories: Vec::new(),
+            data: Vec::new(),
             exports: Vec::new(),
             num_func_imports: 0,
             num_global_imports: 0,
@@ -154,6 +164,12 @@ impl<'a> Module<'a> {
             match payload {
                 Payload::GlobalSection(reader) => {
                     module.globals = reader.into_iter().collect::<Result<_, _>>()?
+                }
+                Payload::MemorySection(reader) => {
+                    module.memories = reader.into_iter().collect::<Result<_, _>>()?
+                }
+                Payload::DataSection(reader) => {
+                    module.data = reader.into_iter().collect::<Result<_, _>>()?
                 }
                 Payload::ExportSection(reader) => {
                     module.exports = reader.into_iter().collect::<Result<_, _>>()?
@@ -190,6 +206,7 @@ impl<'a> Module<'a> {
             match subsection? {
                 Name::Function(map) => self.func_names.read(map)?,
                 Name::Global(map) => self.global_names.read(map)?,
+                Name::Memory(map) => self.memory_names.read(map)?,
                 Name::Local(map) => {
                     for func in map {
                         let func = func?;
@@ -217,6 +234,11 @@ impl<'a> Module<'a> {
             self.print_global(index, g, output)?;
         }
 
+        // private memories
+        for (index, memory) in (0..).zip(&self.memories) {
+            self.print_memory(index, memory, output)?;
+        }
+
         // private functions signatures
         for (index, f) in (self.num_func_imports..).zip(&self.funcs) {
             f.print_signature(&self.func_names.get(index), output)?;
@@ -224,6 +246,11 @@ impl<'a> Module<'a> {
         }
 
         writeln!(output, "\npublic:")?;
+
+        // constructor to copy data segments into memory
+        if !self.data.is_empty() {
+            writeln!(output, "{class_name}();")?;
+        }
 
         // exports
         for Export { name, kind, index } in &self.exports {
@@ -252,6 +279,11 @@ impl<'a> Module<'a> {
                     let global_name = self.global_names.get(*index);
                     writeln!(output, "{ty} {name}() const {{ return {global_name}; }}",)?;
                 }
+                ExternalKind::Memory => {
+                    // exported as a reference to the memory
+                    let memory_name = self.memory_names.get(*index);
+                    writeln!(output, "w2cc::memory& {name}() {{ return {memory_name}; }}")?;
+                }
 
                 _ => bail!("unimplemented export kind: {kind:?}"),
             }
@@ -266,6 +298,10 @@ impl<'a> Module<'a> {
         class_name: &str,
         output: &mut impl Write,
     ) -> Result<()> {
+        if !self.data.is_empty() {
+            self.print_constructor(class_name, output)?;
+        }
+
         let mut allocs = FuncValidatorAllocations::default();
         for (index, f) in (self.num_func_imports..).zip(take(&mut self.funcs)) {
             let name = self.func_names.get(index);
@@ -278,26 +314,79 @@ impl<'a> Module<'a> {
     }
 
     fn print_global(&self, index: u32, global: &Global<'_>, output: &mut impl Write) -> Result<()> {
-        use wasmparser::Operator::*;
-
         let name = self.global_names.get(index);
-        let mut initial_expression = global.init_expr.get_operators_reader();
-
-        let value = match initial_expression.read()? {
-            I32Const { value } => format!("static_cast<i32>({value})"),
-            I64Const { value } => format!("static_cast<i64>({value})"),
-            // Todo: Support floats
-            op => bail!("unimplemented: global initializer {op:?}"),
-        };
-
-        if !initial_expression.is_end_then_eof() {
-            bail!("unimplemented: extended constant expressions");
-        }
-
+        let value = const_expr(&global.init_expr, "global initializer")?;
         let ty = global.ty.content_type;
         writeln!(output, "{ty} {name} = {value};")?;
         Ok(())
     }
+
+    fn print_memory(&self, index: u32, memory: &MemoryType, output: &mut impl Write) -> Result<()> {
+        if memory.memory64 || memory.shared || memory.page_size_log2.is_some() {
+            bail!("unimplemented: memory type {memory:?}");
+        }
+        let name = self.memory_names.get(index);
+        let max_pages = memory.maximum.unwrap_or(65536); // default to 4 GiB limit
+        writeln!(
+            output,
+            "w2cc::memory {name}{{{}, {max_pages}}};",
+            memory.initial
+        )?;
+        Ok(())
+    }
+
+    // copies data segments into memory in order.
+    fn print_constructor(&self, class_name: &str, output: &mut impl Write) -> Result<()> {
+        writeln!(output, "{class_name}::{class_name}() {{")?;
+        for (i, segment) in self.data.iter().enumerate() {
+            let DataKind::Active {
+                memory_index,
+                offset_expr,
+            } = &segment.kind
+            else {
+                bail!("unimplemented: passive data segments");
+            };
+            let memory = self.memory_names.get(*memory_index);
+            let offset = const_expr(offset_expr, "data segment offset")?;
+
+            // check empty segments as well
+            if segment.data.is_empty() {
+                writeln!(output, "{memory}.init({offset}, {{}});")?;
+                continue;
+            }
+            writeln!(output, "static constexpr uint8_t data{i}[] = {{")?;
+            for line in segment.data.chunks(16) {
+                writeln!(
+                    output,
+                    "{},",
+                    line.iter()
+                        .format_with(", ", |b, f| f(&format_args!("{b:#04x}")))
+                )?;
+            }
+            writeln!(output, "}};")?;
+            writeln!(output, "{memory}.init({offset}, data{i});")?;
+        }
+        writeln!(output, "}}")?;
+        Ok(())
+    }
+}
+
+// converts a constant into a C++ literal
+fn const_expr(expr: &ConstExpr<'_>, msg: &str) -> Result<String> {
+    use wasmparser::Operator::*;
+
+    let mut reader = expr.get_operators_reader();
+    let value = match reader.read()? {
+        I32Const { value } => format!("static_cast<i32>({value})"),
+        I64Const { value } => format!("static_cast<i64>({value})"),
+        // Todo: Support floats
+        op => bail!("unimplemented: {msg} {op:?}"),
+    };
+
+    if !reader.is_end_then_eof() {
+        bail!("unimplemented: extended constant expressions");
+    }
+    Ok(value)
 }
 
 impl<'a> Func<'a> {

@@ -6,7 +6,7 @@ use std::{
     fmt::{Display, Formatter},
     io::Write,
 };
-use wasmparser::{Frame, FrameKind, FuncValidator, Operator, ValType, WasmModuleResources};
+use wasmparser::{Frame, FrameKind, FuncValidator, MemArg, Operator, ValType, WasmModuleResources};
 
 #[derive(Copy, Clone)]
 struct Operand(usize);
@@ -40,8 +40,65 @@ impl<'w, W: Write> ExpressionPrinter<'w, W> {
             End => self.visit_end(params, frame),
             GlobalGet { global_index } => self.push(self.module.global_names.get(*global_index)),
             GlobalSet { global_index } => self.visit_global_set(*global_index, params),
+
+            I32Load { memarg } => self.visit_load("i32", memarg, params),
+            I64Load { memarg } => self.visit_load("i64", memarg, params),
+            F32Load { memarg } => self.visit_load("f32", memarg, params),
+            F64Load { memarg } => self.visit_load("f64", memarg, params),
+            I32Load8S { memarg } | I64Load8S { memarg } => {
+                self.visit_load("int8_t", memarg, params)
+            }
+            I32Load8U { memarg } | I64Load8U { memarg } => {
+                self.visit_load("uint8_t", memarg, params)
+            }
+            I32Load16S { memarg } | I64Load16S { memarg } => {
+                self.visit_load("int16_t", memarg, params)
+            }
+            I32Load16U { memarg } | I64Load16U { memarg } => {
+                self.visit_load("uint16_t", memarg, params)
+            }
+            I64Load32S { memarg } => self.visit_load("int32_t", memarg, params),
+            I64Load32U { memarg } => self.visit_load("uint32_t", memarg, params),
+            I32Store { memarg } => self.visit_store("i32", memarg, params),
+            I64Store { memarg } => self.visit_store("i64", memarg, params),
+            F32Store { memarg } => self.visit_store("f32", memarg, params),
+            F64Store { memarg } => self.visit_store("f64", memarg, params),
+            I32Store8 { memarg } | I64Store8 { memarg } => {
+                self.visit_store("uint8_t", memarg, params)
+            }
+            I32Store16 { memarg } | I64Store16 { memarg } => {
+                self.visit_store("uint16_t", memarg, params)
+            }
+            I64Store32 { memarg } => self.visit_store("uint32_t", memarg, params),
+            MemorySize { mem } => {
+                let memory = self.module.memory_names.get(*mem);
+                self.push(format!("{memory}.pages()"))
+            }
+            MemoryGrow { mem } => {
+                let memory = self.module.memory_names.get(*mem);
+                self.push(format!("{memory}.grow({})", params[0]))
+            }
+
             op => bail!("operator {} unimplemented", op_name(op)),
         }
+    }
+
+    fn visit_load(&mut self, ty: &str, memarg: &MemArg, params: Params) -> Result<()> {
+        let memory = self.module.memory_names.get(memarg.memory);
+        let result = *self.pending.last().expect("load result type");
+        let load = format!("{memory}.load<{ty}>({}, {})", params[0], memarg.offset);
+        self.push(format!("static_cast<{result}>({load})"))
+    }
+
+    fn visit_store(&mut self, ty: &str, memarg: &MemArg, params: Params) -> Result<()> {
+        let memory = self.module.memory_names.get(memarg.memory);
+        let (address, value) = (params[0], params[1]);
+        let offset = memarg.offset;
+        writeln!(
+            self.out,
+            "{memory}.store({address}, {offset}, static_cast<{ty}>({value}));"
+        )?;
+        Ok(())
     }
 
     fn enter_frame(&mut self, op: &Operator, params: Params) -> Result<()> {

@@ -43,7 +43,8 @@ pub fn wast2c<U: Write>(
          }}
 
          extern \"C\" unsigned int run(void) {{
-         g_success_count = 0;\n"
+         g_success_count = 0;
+         try {{\n"
     )?;
 
     // loop through every directive/command in the Wast script.
@@ -64,23 +65,11 @@ pub fn wast2c<U: Write>(
                 results,
                 span,
             } => {
-                let (name, args) = match exec {
-                    WastExecute::Invoke(WastInvoke {
-                        span: _,
-                        module: None,
-                        name,
-                        args,
-                    }) => (name, args),
-                    WastExecute::Get {
-                        span: _,
-                        module: None,
-                        global,
-                    } => (global, vec![]),
-                    _ => continue,
+                let Some(call) = call_expr(&exec, last_module_instance_name.as_deref()) else {
+                    continue;
                 };
                 let line_no = span.linecol_in(text).0;
 
-                let inst = last_module_instance_name.as_ref().expect("previous module");
                 writeln!(cc, "{{")?;
 
                 match results.iter().as_slice() {
@@ -92,8 +81,6 @@ pub fn wast2c<U: Write>(
                         vals.iter().map(ret_value).format(", ")
                     )?,
                 };
-
-                let call = format!("{inst}.{name}({})", args.iter().map(arg_value).format(", "));
 
                 if results.is_empty() {
                     writedoc!(
@@ -113,14 +100,60 @@ pub fn wast2c<U: Write>(
 
                 writeln!(cc, "}}")?;
             }
+            WastDirective::AssertTrap { exec, span, .. } => {
+                let Some(call) = call_expr(&exec, last_module_instance_name.as_deref()) else {
+                    continue;
+                };
+                let line_no = span.linecol_in(text).0;
+
+                // passes if the call traps
+                writedoc!(
+                    cc,
+                    "try {{
+                       {call};
+                       std::println(stderr, \"error, expected a trap on {line_no}\");
+                     }} catch (const w2cc::trap_error&) {{
+                       g_success_count++;
+                     }}\n"
+                )?;
+            }
             _ => {}
         }
     }
 
-    writeln!(cc, "return g_success_count;")?;
-    writeln!(cc, "}}")?;
+    // prevent escaping run()
+    writedoc!(
+        cc,
+        "}} catch (const std::exception& e) {{
+           std::println(stderr, \"error, unexpected exception: {{}}\", e.what());
+         }}
+         return g_success_count;
+         }}\n"
+    )?;
 
     Ok(num_directives)
+}
+
+fn call_expr(exec: &WastExecute<'_>, instance: Option<&str>) -> Option<String> {
+    let (name, args) = match exec {
+        WastExecute::Invoke(WastInvoke {
+            module: None,
+            name,
+            args,
+            ..
+        }) => (*name, args.as_slice()),
+        WastExecute::Get {
+            module: None,
+            global,
+            ..
+        } => (*global, &[][..]),
+        _ => return None,
+    };
+    let instance = instance.expect("previous module");
+    Some(format!(
+        "{instance}.{name}({})",
+        args.iter().map(arg_value).format(", ")
+    ))
 }
 
 fn arg_value(arg: &WastArg<'_>) -> impl Display {
@@ -140,7 +173,7 @@ fn ret_value(ret: &WastRet<'_>) -> impl Display {
 }
 
 pub(crate) fn print_includes(out: &mut impl Write) -> Result<()> {
-    let script_includes = ["print"];
+    let script_includes = ["exception", "print"];
     for inc in script_includes {
         writeln!(out, "#include <{}>", inc)?;
     }
