@@ -158,16 +158,16 @@ fn call_expr(exec: &WastExecute<'_>, instance: Option<&str>) -> Option<String> {
 
 fn arg_value(arg: &WastArg<'_>) -> impl Display {
     core::fmt::from_fn(move |f| match arg {
-        WastArg::Core(WastArgCore::I32(v)) => write!(f, "{v}"),
-        WastArg::Core(WastArgCore::I64(v)) => write!(f, "{v}"),
+        WastArg::Core(WastArgCore::I32(v)) => write!(f, "{}u", *v as u32),
+        WastArg::Core(WastArgCore::I64(v)) => write!(f, "{}ull", *v as u64),
         _ => unimplemented!("wast arg"),
     })
 }
 
 fn ret_value(ret: &WastRet<'_>) -> impl Display {
     core::fmt::from_fn(move |f| match ret {
-        WastRet::Core(WastRetCore::I32(v)) => write!(f, "i32({v})"),
-        WastRet::Core(WastRetCore::I64(v)) => write!(f, "i64({v})"),
+        WastRet::Core(WastRetCore::I32(v)) => write!(f, "i32({}u)", *v as u32),
+        WastRet::Core(WastRetCore::I64(v)) => write!(f, "i64({}ull)", *v as u64),
         _ => unimplemented!("wast ret"),
     })
 }
