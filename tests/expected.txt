@@ -1,3 +1,4 @@
+const.wast: 2/2 tests passed.
 locals.wat: 1/1 tests passed.
 params.wat: 1/1 tests passed.
 seven.wast: 2/2 tests passed.

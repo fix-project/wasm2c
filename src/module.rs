@@ -377,8 +377,8 @@ fn const_expr(expr: &ConstExpr<'_>, msg: &str) -> Result<String> {
 
     let mut reader = expr.get_operators_reader();
     let value = match reader.read()? {
-        I32Const { value } => format!("static_cast<i32>({value})"),
-        I64Const { value } => format!("static_cast<i64>({value})"),
+        I32Const { value } => format!("static_cast<i32>({}u)", value as u32),
+        I64Const { value } => format!("static_cast<i64>({}ull)", value as u64),
         // Todo: Support floats
         op => bail!("unimplemented: {msg} {op:?}"),
     };
