@@ -1,3 +1,4 @@
+mod mangle;
 mod module;
 mod operators;
 mod script;
