@@ -32,8 +32,8 @@ impl<'w, W: Write> ExpressionPrinter<'w, W> {
     fn do_operator(&mut self, op: &Operator, params: Params, frame: Frame) -> Result<()> {
         use Operator::*;
         match op {
-            I32Const { value } => self.push(format!("static_cast<i32>({}u)", *value as u32)),
-            I64Const { value } => self.push(format!("static_cast<i64>({}ull)", *value as u64)),
+            I32Const { value } => self.push(format!("i32{{{}u}}", *value as u32)),
+            I64Const { value } => self.push(format!("i64{{{}u}}", *value as u64)),
             I32Add => self.push(format!("{} + {}", params[0], params[1])),
             Drop => Ok(()),
             Block { .. } => self.enter_frame(op, params),
