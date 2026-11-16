@@ -1,4 +1,7 @@
-use crate::{OutputSpec, operators::ExpressionPrinter};
+use crate::{
+    OutputSpec,
+    operators::{ExpressionPrinter, const_literal},
+};
 use anyhow::{Result, bail};
 use convert_case::ccase;
 use itertools::Itertools;
@@ -315,7 +318,7 @@ impl<'a> Module<'a> {
 
     fn print_global(&self, index: u32, global: &Global<'_>, output: &mut impl Write) -> Result<()> {
         let name = self.global_names.get(index);
-        let value = const_expr(&global.init_expr, "global initializer")?;
+        let value = const_expr(&global.init_expr)?;
         let ty = global.ty.content_type;
         writeln!(output, "{ty} {name} = {value};")?;
         Ok(())
@@ -347,7 +350,7 @@ impl<'a> Module<'a> {
                 bail!("unimplemented: passive data segments");
             };
             let memory = self.memory_names.get(*memory_index);
-            let offset = const_expr(offset_expr, "data segment offset")?;
+            let offset = const_expr(offset_expr)?;
 
             // check empty segments as well
             if segment.data.is_empty() {
@@ -372,21 +375,13 @@ impl<'a> Module<'a> {
 }
 
 // converts a constant into a C++ literal
-fn const_expr(expr: &ConstExpr<'_>, msg: &str) -> Result<String> {
-    use wasmparser::Operator::*;
-
+fn const_expr(expr: &ConstExpr<'_>) -> Result<String> {
     let mut reader = expr.get_operators_reader();
-    let value = match reader.read()? {
-        I32Const { value } => format!("static_cast<i32>({}u)", value as u32),
-        I64Const { value } => format!("static_cast<i64>({}ull)", value as u64),
-        // Todo: Support floats
-        op => bail!("unimplemented: {msg} {op:?}"),
-    };
-
+    let value = const_literal(&reader.read()?);
     if !reader.is_end_then_eof() {
         bail!("unimplemented: extended constant expressions");
     }
-    Ok(value)
+    value
 }
 
 impl<'a> Func<'a> {
