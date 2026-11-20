@@ -18,15 +18,15 @@
 // where A B are hex digits (0-9, A-F) representing the character's
 // numeric value.
 
-pub(crate) fn mangle(name: &str) -> String {
-    // tracks the format of a hex digit
-    #[derive(PartialEq, Eq)]
-    enum HexState {
-        None,
-        Zero,
-        ZeroX,
-    }
+// tracks the format of a hex digit
+#[derive(PartialEq, Eq)]
+enum HexState {
+    None,
+    Zero,
+    ZeroX,
+}
 
+pub(crate) fn mangle(name: &str) -> String {
     let bytes = name.as_bytes();
     let mut out = String::new();
     let mut state = HexState::None;
