@@ -6,7 +6,9 @@ use std::{
     fmt::{Display, Formatter},
     io::Write,
 };
-use wasmparser::{Frame, FrameKind, FuncValidator, MemArg, Operator, ValType, WasmModuleResources};
+use wasmparser::{
+    BlockType, Frame, FrameKind, FuncValidator, MemArg, Operator, ValType, WasmModuleResources,
+};
 
 #[derive(Copy, Clone)]
 struct Operand(usize);
@@ -17,11 +19,34 @@ impl Display for Operand {
     }
 }
 
+#[derive(Clone)]
+struct BlockFrame {
+    // 0 is reserved for the function frame.
+    idx: usize,
+    kind: FrameKind,
+    result: Option<Operand>,
+    branched: bool,
+    reachable: bool,
+}
+
+impl BlockFrame {
+    /// Whether control can continue in the enclosing frame after this frame's
+    /// `end` instruction.
+    fn exits_to_parent(&self) -> bool {
+        match self.kind {
+            FrameKind::Loop => self.reachable,
+            _ => self.reachable || self.branched,
+        }
+    }
+}
+
 pub(crate) struct ExpressionPrinter<'w, W> {
     module: &'w Module<'w>,
     stack: Vec<Operand>,
     pending: Vec<ValType>,
+    frames: Vec<BlockFrame>,
     push_counter: usize,
+    label_counter: usize,
     out: &'w mut W,
 }
 
@@ -36,7 +61,8 @@ impl<'w, W: Write> ExpressionPrinter<'w, W> {
             I64Const { value } => self.push(format!("static_cast<i64>({value})")),
             I32Add => self.push(format!("{} + {}", params[0], params[1])),
             Drop => Ok(()),
-            Block { .. } => self.enter_frame(op, params),
+            Block { blockty } => self.visit_block(*blockty, params),
+            Br { relative_depth } => self.visit_br(*relative_depth, params),
             End => self.visit_end(params, frame),
             GlobalGet { global_index } => self.push(self.module.global_names.get(*global_index)),
             GlobalSet { global_index } => self.visit_global_set(*global_index, params),
@@ -101,25 +127,100 @@ impl<'w, W: Write> ExpressionPrinter<'w, W> {
         Ok(())
     }
 
-    fn enter_frame(&mut self, op: &Operator, params: Params) -> Result<()> {
-        match op {
-            Operator::Block { .. } => self.cross_frame(&params),
-            _ => bail!("frame kind {} unimplemented", op_name(op)),
+    fn visit_block(&mut self, blockty: BlockType, params: Params) -> Result<()> {
+        self.cross_frame(&params);
+
+        // Declare result before entering the block
+        let result = match blockty {
+            BlockType::Empty => None,
+            BlockType::Type(ty) => Some(self.push_default(ty)?),
+            BlockType::FuncType(_) => bail!("unimplemented multi-value"),
+        };
+
+        let idx = self.label_counter;
+        self.label_counter += 1;
+        writeln!(self.out, "{{")?;
+
+        self.frames.push(BlockFrame {
+            idx,
+            kind: FrameKind::Block,
+            result,
+            branched: false,
+            reachable: true,
+        });
+
+        Ok(())
+    }
+
+    fn visit_br(&mut self, relative_depth: u32, params: Params) -> Result<()> {
+        let target_index = self
+            .frames
+            .len()
+            .checked_sub(1 + relative_depth as usize)
+            .expect("valid branch depth");
+
+        let target = self.frames[target_index].clone();
+
+        // Frame 0 is the implicit function frame, so branching to it is
+        // equivalent to an early return.
+        if target_index == 0 {
+            // wait until we implement `visit_return` to reuse the logic
+            bail!("unimplemented early return from function frame");
         }
+
+        match target.kind {
+            FrameKind::Block => {}
+            kind => bail!("unimplemented branch to {kind:?} frame"),
+        }
+
+        // Conclude block once we're unconditionally branching out
+        self.conclude_block(&target, &params)?;
+        writeln!(self.out, "goto block{};", target.idx)?;
+
+        self.frames[target_index].branched = true;
+        self.frames.last_mut().expect("control frame").reachable = false;
         Ok(())
     }
 
     fn visit_end(&mut self, params: Params, frame: Frame) -> Result<()> {
-        self.cross_frame(&params);
-
-        match frame.kind {
-            FrameKind::Block => {
-                // TODO: write label with unique name (or names-section-assigned name)
-                writeln!(self.out, "block{}:", frame.height)?;
-                Ok(())
-            }
-            kind => bail!("exit on {kind:?} is not implemented"),
+        // function end
+        if self.frames.len() == 1 {
+            return self.end_function(params, frame);
         }
+
+        match self.current_block().kind {
+            FrameKind::Block => self.end_block(params, frame),
+            _ => bail!("unimplemented block kind"),
+        }
+    }
+
+    fn end_function(&mut self, params: Params, frame: Frame) -> Result<()> {
+        self.stack.truncate(frame.height);
+        self.cross_frame(&params);
+        self.frames.pop();
+        Ok(())
+    }
+
+    fn end_block(&mut self, params: Params, frame: Frame) -> Result<()> {
+        // close block out, put goto label, and drain block results
+        let block = self.frames.pop().expect("block frame");
+        self.stack.truncate(frame.height);
+
+        self.conclude_block(&block, &params)?;
+        writeln!(self.out, "}}")?;
+
+        if block.branched {
+            writeln!(self.out, "block{}: ;", block.idx)?;
+        }
+
+        let reachable = self.current_block().reachable && block.exits_to_parent();
+        self.frames.last_mut().expect("control frame").reachable = reachable;
+        if reachable {
+            self.stack.extend(block.result);
+        }
+
+        self.pending.clear();
+        Ok(())
     }
 
     fn visit_global_set(&mut self, global_index: u32, params: Params) -> Result<()> {
@@ -133,9 +234,25 @@ impl<'w, W: Write> ExpressionPrinter<'w, W> {
             module,
             stack: vec![],
             pending: vec![],
+            frames: vec![BlockFrame {
+                idx: 0,
+                // wasmparser represents the implicit function frame as a block
+                kind: FrameKind::Block,
+                result: None,
+                branched: false,
+                reachable: true,
+            }],
             push_counter: 0,
+            label_counter: 1,
             out,
         }
+    }
+
+    fn push_default(&mut self, ty: ValType) -> Result<Operand> {
+        let operand = Operand(self.push_counter);
+        self.push_counter += 1;
+        writeln!(self.out, "{ty} {operand}{{}};")?;
+        Ok(operand)
     }
 
     fn push(&mut self, expr: impl Display) -> Result<()> {
@@ -156,6 +273,20 @@ impl<'w, W: Write> ExpressionPrinter<'w, W> {
         self.pending.clear();
     }
 
+    fn current_block(&self) -> &BlockFrame {
+        self.frames.last().expect("control frame")
+    }
+
+    fn conclude_block(&mut self, block: &BlockFrame, params: &Params) -> Result<()> {
+        if let Some(slot) = block.result
+            && block.reachable
+        {
+            writeln!(self.out, "{slot} = {};", params[0])?;
+        }
+
+        Ok(())
+    }
+
     // public entry point -- called on each operator
     pub fn op<T: WasmModuleResources>(
         &mut self,
@@ -163,6 +294,25 @@ impl<'w, W: Write> ExpressionPrinter<'w, W> {
         op: &Operator,
         offset: u64,
     ) -> Result<()> {
+        // Skip unreachable code (like wasm2c)
+        if !self.current_block().reachable {
+            // Once we reach unreachable code, we stop pushing blocks, but
+            // the validator doesn't, so we just wait until our frames and the
+            // validators frames line up again to indicate we've ended the
+            // unreachable
+            if matches!(op, Operator::End)
+                && validator.control_stack_height() as usize == self.frames.len()
+            {
+                let frame = validator.get_control_frame(0).copied().expect("frame");
+                validator.op(offset, op)?;
+                self.visit_end(Params::new(), frame)?;
+            } else {
+                validator.op(offset, op)?;
+            }
+
+            return Ok(());
+        }
+
         // Collect arity, top control frame, and params before validation changes the validator's state.
         let Some((num_params, num_results)) = op.operator_arity(validator) else {
             validator.op(offset, op)?; // report validation error
@@ -172,7 +322,7 @@ impl<'w, W: Write> ExpressionPrinter<'w, W> {
         let num_results: usize = num_results.try_into().unwrap();
         let frame = validator.get_control_frame(0).copied().expect("frame");
 
-        let split = self.stack.len() - num_params; // TODO: stack polymorphism in unreachable code
+        let split = self.stack.len() - num_params;
         let params: Params = self.stack.drain(split..).collect();
 
         // validate the operator
