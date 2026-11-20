@@ -1,4 +1,4 @@
-use crate::{OutputSpec, wasm2c};
+use crate::{OutputSpec, mangle::mangle, wasm2c};
 use anyhow::{Result, bail};
 use indoc::writedoc;
 use itertools::Itertools;
@@ -151,7 +151,8 @@ fn call_expr(exec: &WastExecute<'_>, instance: Option<&str>) -> Option<String> {
     };
     let instance = instance.expect("previous module");
     Some(format!(
-        "{instance}.{name}({})",
+        "{instance}.{}({})",
+        mangle(name),
         args.iter().map(arg_value).format(", ")
     ))
 }
