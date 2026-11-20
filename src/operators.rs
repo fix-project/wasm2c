@@ -26,18 +26,6 @@ struct BlockFrame {
     kind: FrameKind,
     result: Option<Operand>,
     branched: bool,
-    reachable: bool,
-}
-
-impl BlockFrame {
-    /// Whether control can continue in the enclosing frame after this frame's
-    /// `end` instruction.
-    fn exits_to_parent(&self) -> bool {
-        match self.kind {
-            FrameKind::Loop => self.reachable,
-            _ => self.reachable || self.branched,
-        }
-    }
 }
 
 pub(crate) struct ExpressionPrinter<'w, W> {
@@ -47,6 +35,7 @@ pub(crate) struct ExpressionPrinter<'w, W> {
     frames: Vec<BlockFrame>,
     push_counter: usize,
     label_counter: usize,
+    reachable: bool,
     out: &'w mut W,
 }
 
@@ -146,7 +135,6 @@ impl<'w, W: Write> ExpressionPrinter<'w, W> {
             kind: FrameKind::Block,
             result,
             branched: false,
-            reachable: true,
         });
 
         Ok(())
@@ -178,7 +166,8 @@ impl<'w, W: Write> ExpressionPrinter<'w, W> {
         writeln!(self.out, "goto block{};", target.idx)?;
 
         self.frames[target_index].branched = true;
-        self.frames.last_mut().expect("control frame").reachable = false;
+        self.reachable = false;
+
         Ok(())
     }
 
@@ -206,16 +195,23 @@ impl<'w, W: Write> ExpressionPrinter<'w, W> {
         let block = self.frames.pop().expect("block frame");
         self.stack.truncate(frame.height);
 
-        self.conclude_block(&block, &params)?;
+        if self.reachable {
+            self.conclude_block(&block, &params)?;
+        }
+
         writeln!(self.out, "}}")?;
 
         if block.branched {
             writeln!(self.out, "block{}: ;", block.idx)?;
         }
 
-        let reachable = self.current_block().reachable && block.exits_to_parent();
-        self.frames.last_mut().expect("control frame").reachable = reachable;
-        if reachable {
+        self.reachable = match block.kind {
+            // branching to a loop causes a loop
+            FrameKind::Loop => self.reachable,
+            _ => self.reachable || block.branched,
+        };
+
+        if self.reachable {
             self.stack.extend(block.result);
         }
 
@@ -240,10 +236,10 @@ impl<'w, W: Write> ExpressionPrinter<'w, W> {
                 kind: FrameKind::Block,
                 result: None,
                 branched: false,
-                reachable: true,
             }],
             push_counter: 0,
             label_counter: 1,
+            reachable: true,
             out,
         }
     }
@@ -278,9 +274,7 @@ impl<'w, W: Write> ExpressionPrinter<'w, W> {
     }
 
     fn conclude_block(&mut self, block: &BlockFrame, params: &Params) -> Result<()> {
-        if let Some(slot) = block.result
-            && block.reachable
-        {
+        if let Some(slot) = block.result {
             writeln!(self.out, "{slot} = {};", params[0])?;
         }
 
@@ -295,7 +289,7 @@ impl<'w, W: Write> ExpressionPrinter<'w, W> {
         offset: u64,
     ) -> Result<()> {
         // Skip unreachable code (like wasm2c)
-        if !self.current_block().reachable {
+        if !self.reachable {
             // Once we reach unreachable code, we stop pushing blocks, but
             // the validator doesn't, so we just wait until our frames and the
             // validators frames line up again to indicate we've ended the
