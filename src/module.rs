@@ -1,9 +1,9 @@
 use crate::{
     OutputSpec,
+    mangle::mangle,
     operators::{ExpressionPrinter, const_literal},
 };
 use anyhow::{Result, bail};
-use convert_case::ccase;
 use itertools::Itertools;
 use std::{collections::HashMap, io::Write, mem::take};
 use wasmparser::{
@@ -25,7 +25,7 @@ pub fn wasm2c<U: Write>(name: &str, wasm: &[u8], output: &mut OutputSpec<U>) -> 
         writeln!(cc, "#include \"{hh_include}\"")?;
     }
 
-    let class_name = format!("{W2CC}{}", ccase!(snake, name));
+    let class_name = format!("{W2CC}{}", mangle(name));
 
     let module = Module::new(wasm)?;
 
@@ -105,7 +105,7 @@ impl NamingMap {
     fn read(&mut self, map: NameMap<'_>) -> Result<()> {
         for naming in map {
             let Naming { index, name } = naming?;
-            self.names.insert(index, name.to_owned());
+            self.names.insert(index, mangle(name));
         }
         Ok(())
     }
@@ -257,6 +257,7 @@ impl<'a> Module<'a> {
 
         // exports
         for Export { name, kind, index } in &self.exports {
+            let name = &mangle(name);
             match kind {
                 ExternalKind::Func => {
                     let Some(raw_index) = index.checked_sub(self.num_func_imports) else {
