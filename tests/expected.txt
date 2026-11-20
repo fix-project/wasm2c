@@ -9,10 +9,10 @@ align.wast error: operator F32Const unimplemented.
 binary-leb128.wast: 25/81 tests passed.
 binary.wast error: operator If unimplemented.
 block.wast error: operator Nop unimplemented.
-br.wast error: operator Br unimplemented.
+br.wast error: operator F32Const unimplemented.
 br_if.wast error: operator BrIf unimplemented.
 br_table.wast error: operator BrTable unimplemented.
-break-drop.wast error: operator Br unimplemented.
+break-drop.wast error: operator BrIf unimplemented.
 call.wast error: operator F32Const unimplemented.
 call_indirect.wast error: unimplemented floating-point literal.
 comments.wast: 4/4 tests passed.
@@ -45,10 +45,10 @@ imports.wast error: unimplemented floating-point literal.
 inline-module.wast: 1/1 tests passed.
 int_exprs.wast error: operator LocalGet unimplemented.
 int_literals.wast error: operator Return unimplemented.
-labels.wast error: operator Br unimplemented.
+labels.wast error: operator LocalSet unimplemented.
 left-to-right.wast error: operator Call unimplemented.
 linking.wast error: operator Call unimplemented.
-load.wast error: operator Br unimplemented.
+load.wast error: operator BrIf unimplemented.
 local_get.wast error: operator LocalGet unimplemented.
 local_set.wast error: operator LocalSet unimplemented.
 local_tee.wast error: operator LocalTee unimplemented.
