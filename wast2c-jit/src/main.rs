@@ -78,10 +78,11 @@ fn run_script(file: &PathBuf) -> Result<String> {
         Ok(num_directives) => {
             header.push(0); // NUL-terminate for clang
             body.push(0);
-            let num_successes = run(&header, &body)?;
-            Ok(format!(
-                "{name}: {num_successes}/{num_directives} tests passed."
-            ))
+            let num_successes = run(&header, &body);
+            match num_successes {
+                Ok(n) => Ok(format!("{name}: {n}/{num_directives} tests passed.")),
+                Err(e) => Ok(format!("{name} error: {e}.")),
+            }
         }
         Err(e) => Ok(format!("{name} error: {e}.")),
     }

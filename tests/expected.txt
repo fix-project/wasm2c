@@ -1,22 +1,24 @@
 const.wast: 2/2 tests passed.
+floating-gaps.wast: 160/160 tests passed.
+floating.wast: 2478/2478 tests passed.
 locals.wat: 1/1 tests passed.
 params.wat: 1/1 tests passed.
 seven.wast: 2/2 tests passed.
 simple-globals.wast: 19/19 tests passed.
 simple-memory.wast: 34/34 tests passed.
 address.wast error: operator LocalGet unimplemented.
-align.wast error: operator F32Const unimplemented.
+align.wast error: operator LocalSet unimplemented.
 binary-leb128.wast: 25/81 tests passed.
 binary.wast error: operator If unimplemented.
 block.wast error: operator Nop unimplemented.
-br.wast error: operator F32Const unimplemented.
+br.wast error: operator Call unimplemented.
 br_if.wast error: operator BrIf unimplemented.
 br_table.wast error: operator BrTable unimplemented.
 break-drop.wast error: operator BrIf unimplemented.
-call.wast error: operator F32Const unimplemented.
-call_indirect.wast error: unimplemented floating-point literal.
+call.wast error: operator LocalGet unimplemented.
+call_indirect.wast error: operator LocalGet unimplemented.
 comments.wast: 4/4 tests passed.
-const.wast error: operator F32Const unimplemented.
+const.wast: 690/766 tests passed.
 conversions.wast error: operator LocalGet unimplemented.
 custom.wast error: operator LocalGet unimplemented.
 data.wast error: duplicate data identifier at byte offset 385.
@@ -31,17 +33,17 @@ f64_bitwise.wast error: operator LocalGet unimplemented.
 f64_cmp.wast error: operator LocalGet unimplemented.
 fac.wast error: operator LocalGet unimplemented.
 float_exprs.wast error: operator LocalGet unimplemented.
-float_literals.wast error: operator F32Const unimplemented.
-float_memory.wast error: operator F32Const unimplemented.
+float_literals.wast error: failed to run C++ source code.
+float_memory.wast error: failed to run C++ source code.
 float_misc.wast error: operator LocalGet unimplemented.
 forward.wast error: operator LocalGet unimplemented.
 func.wast error: operator Unreachable unimplemented.
 func_ptrs.wast error: operator LocalGet unimplemented.
-globals.wast error: unimplemented floating-point literal.
+globals.wast error: operator LocalGet unimplemented.
 i32.wast error: operator LocalGet unimplemented.
 i64.wast error: operator LocalGet unimplemented.
 if.wast error: operator LocalGet unimplemented.
-imports.wast error: unimplemented floating-point literal.
+imports.wast error: unimplemented export kind: Table.
 inline-module.wast: 1/1 tests passed.
 int_exprs.wast error: operator LocalGet unimplemented.
 int_literals.wast error: operator Return unimplemented.
@@ -55,9 +57,9 @@ local_tee.wast error: operator LocalTee unimplemented.
 loop.wast error: operator Loop unimplemented.
 memory.wast error: operator I32Eq unimplemented.
 memory_grow.wast error: operator LocalGet unimplemented.
-memory_redundancy.wast error: operator F32Const unimplemented.
+memory_redundancy.wast error: operator LocalSet unimplemented.
 memory_size.wast error: operator LocalGet unimplemented.
-memory_trap.wast error: operator I32Mul unimplemented.
+memory_trap.wast error: operator Call unimplemented.
 names.wast error: operator LocalGet unimplemented.
 nop.wast error: operator LocalGet unimplemented.
 return.wast error: operator Return unimplemented.
@@ -71,7 +73,7 @@ token.wast: 0/2 tests passed.
 traps.wast error: operator LocalGet unimplemented.
 type.wast: 1/5 tests passed.
 typecheck.wast: 0/164 tests passed.
-unreachable.wast error: unimplemented floating-point literal.
+unreachable.wast error: operator Unreachable unimplemented.
 unreached-invalid.wast: 0/111 tests passed.
 unwind.wast error: operator Unreachable unimplemented.
 utf8-custom-section-id.wast: 0/176 tests passed.

@@ -6,9 +6,12 @@
 #include W2CC_RUNTIME
 #else
 
+#include <cmath>
+#include <concepts>
 #include <cstdint>
 #include <cstdlib>
 #include <cstring>
+#include <limits>
 #include <new>
 #include <span>
 #include <stdexcept>
@@ -22,6 +25,63 @@ struct trap_error : std::runtime_error
 // wasm_rt_trap. TODO: use longjmp instead of C++ exceptions
 [[noreturn]] inline void trap( const char* reason )
 { throw trap_error( reason ); }
+
+template<std::integral I, std::floating_point F>
+I trunc( F value )
+{
+  const F lower = static_cast<F>( std::numeric_limits<I>::min() );
+  const F upper = std::ldexp( F { 1 }, std::numeric_limits<I>::digits );
+  const F truncated = std::trunc( value );
+  if ( !( truncated >= lower && truncated < upper ) ) [[unlikely]] {
+    trap( std::isnan( truncated ) ? "invalid conversion to integer" : "integer overflow" );
+  }
+  return static_cast<I>( truncated );
+}
+
+template<std::integral I, std::floating_point F>
+I trunc_sat( F value )
+{
+  const F lower = static_cast<F>( std::numeric_limits<I>::min() );
+  const F upper = std::ldexp( F { 1 }, std::numeric_limits<I>::digits );
+  const F truncated = std::trunc( value );
+  if ( std::isnan( truncated ) ) { return I { 0 }; }
+  if ( truncated < lower ) { return std::numeric_limits<I>::min(); }
+  if ( truncated >= upper ) { return std::numeric_limits<I>::max(); }
+  return static_cast<I>( truncated );
+}
+
+template<std::floating_point F>
+F quiet( F x )
+{
+  if ( std::isnan( x ) ) [[unlikely]] { return x + x; }
+  return x;
+}
+
+template<std::floating_point F>
+F ceil( F x )
+{ return quiet( std::ceil( x ) ); }
+
+template<std::floating_point F>
+F floor( F x )
+{ return quiet( std::floor( x ) ); }
+
+template<std::floating_point F>
+F trunc( F x )
+{ return quiet( std::trunc( x ) ); }
+
+template<typename F>
+F min( F a, F b )
+{
+  if ( std::isnan( a ) || std::isnan( b ) ) [[unlikely]] { return a + b; }
+  return ( a < b || ( a == b && std::signbit( a ) ) ) ? a : b;
+}
+
+template<typename F>
+F max( F a, F b )
+{
+  if ( std::isnan( a ) || std::isnan( b ) ) [[unlikely]] { return a + b; }
+  return ( a > b || ( a == b && std::signbit( b ) ) ) ? a : b;
+}
 
 // Only bounds-checked. TODO: use guard pages
 class memory

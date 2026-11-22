@@ -46,9 +46,89 @@ impl<'w, W: Write> ExpressionPrinter<'w, W> {
     fn do_operator(&mut self, op: &Operator, params: Params, frame: Frame) -> Result<()> {
         use Operator::*;
         match op {
-            I32Const { .. } => self.push(const_literal(op)?),
-            I64Const { .. } => self.push(const_literal(op)?),
-            I32Add => self.push(format!("{} + {}", params[0], params[1])),
+            I32Const { .. } | I64Const { .. } | F32Const { .. } | F64Const { .. } => {
+                self.push(const_literal(op)?)
+            }
+            I32Add | I64Add | F32Add | F64Add => {
+                self.push(format!("{} + {}", params[0], params[1]))
+            }
+            I32Sub | I64Sub | F32Sub | F64Sub => {
+                self.push(format!("{} - {}", params[0], params[1]))
+            }
+            I32Mul | I64Mul | F32Mul | F64Mul => {
+                self.push(format!("{} * {}", params[0], params[1]))
+            }
+            F32Div | F64Div => self.push(format!("{} / {}", params[0], params[1])),
+            F32Neg | F64Neg => self.push(format!("-{}", params[0])),
+            F32Eq | F64Eq => self.push(format!("static_cast<i32>({} == {})", params[0], params[1])),
+            F32Ne | F64Ne => self.push(format!("static_cast<i32>({} != {})", params[0], params[1])),
+            F32Lt | F64Lt => self.push(format!("static_cast<i32>({} < {})", params[0], params[1])),
+            F32Gt | F64Gt => self.push(format!("static_cast<i32>({} > {})", params[0], params[1])),
+            F32Le | F64Le => self.push(format!("static_cast<i32>({} <= {})", params[0], params[1])),
+            F32Ge | F64Ge => self.push(format!("static_cast<i32>({} >= {})", params[0], params[1])),
+            F32Abs | F64Abs => self.push(format!("std::abs({})", params[0])),
+            F32Ceil | F64Ceil => self.push(format!("w2cc::ceil({})", params[0])),
+            F32Copysign | F64Copysign => {
+                self.push(format!("std::copysign({}, {})", params[0], params[1]))
+            }
+            F32Floor | F64Floor => self.push(format!("w2cc::floor({})", params[0])),
+            F32Min | F64Min => self.push(format!("w2cc::min({}, {})", params[0], params[1])),
+            F32Max | F64Max => self.push(format!("w2cc::max({}, {})", params[0], params[1])),
+            F32Nearest | F64Nearest => self.push(format!("std::nearbyint({})", params[0])),
+            F32Sqrt | F64Sqrt => self.push(format!("std::sqrt({})", params[0])),
+            F32Trunc | F64Trunc => self.push(format!("w2cc::trunc({})", params[0])),
+            I32ReinterpretF32 => self.push(format!("std::bit_cast<i32>({})", params[0])),
+            I64ReinterpretF64 => self.push(format!("std::bit_cast<i64>({})", params[0])),
+            F32ReinterpretI32 => self.push(format!("std::bit_cast<f32>({})", params[0])),
+            F64ReinterpretI64 => self.push(format!("std::bit_cast<f64>({})", params[0])),
+            F32ConvertI32S => self.push(format!(
+                "static_cast<f32>(std::bit_cast<int32_t>({}))",
+                params[0]
+            )),
+            F32ConvertI64S => self.push(format!(
+                "static_cast<f32>(std::bit_cast<int64_t>({}))",
+                params[0]
+            )),
+            F64ConvertI32S => self.push(format!(
+                "static_cast<f64>(std::bit_cast<int32_t>({}))",
+                params[0]
+            )),
+            F64ConvertI64S => self.push(format!(
+                "static_cast<f64>(std::bit_cast<int64_t>({}))",
+                params[0]
+            )),
+            F32ConvertI32U | F32ConvertI64U => {
+                self.push(format!("static_cast<f32>({})", params[0]))
+            }
+            F64ConvertI32U | F64ConvertI64U => {
+                self.push(format!("static_cast<f64>({})", params[0]))
+            }
+            F32DemoteF64 => self.push(format!("static_cast<f32>({})", params[0])),
+            F64PromoteF32 => self.push(format!("static_cast<f64>({})", params[0])),
+            I32TruncF32S | I32TruncF64S => self.push(format!(
+                "std::bit_cast<i32>(w2cc::trunc<int32_t>({}))",
+                params[0]
+            )),
+            I64TruncF32S | I64TruncF64S => self.push(format!(
+                "std::bit_cast<i64>(w2cc::trunc<int64_t>({}))",
+                params[0]
+            )),
+            I32TruncF32U | I32TruncF64U => self.push(format!("w2cc::trunc<i32>({})", params[0])),
+            I64TruncF32U | I64TruncF64U => self.push(format!("w2cc::trunc<i64>({})", params[0])),
+            I32TruncSatF32S | I32TruncSatF64S => self.push(format!(
+                "std::bit_cast<i32>(w2cc::trunc_sat<int32_t>({}))",
+                params[0]
+            )),
+            I64TruncSatF32S | I64TruncSatF64S => self.push(format!(
+                "std::bit_cast<i64>(w2cc::trunc_sat<int64_t>({}))",
+                params[0]
+            )),
+            I32TruncSatF32U | I32TruncSatF64U => {
+                self.push(format!("w2cc::trunc_sat<i32>({})", params[0]))
+            }
+            I64TruncSatF32U | I64TruncSatF64U => {
+                self.push(format!("w2cc::trunc_sat<i64>({})", params[0]))
+            }
             Drop => Ok(()),
             Block { blockty } => self.visit_block(*blockty, params),
             Br { relative_depth } => self.visit_br(*relative_depth, params),
@@ -363,8 +443,8 @@ pub(crate) fn const_literal(op: &Operator<'_>) -> Result<String> {
     Ok(match op {
         I32Const { value } => format!("i32{{{}u}}", *value as u32),
         I64Const { value } => format!("i64{{{}u}}", *value as u64),
-        F32Const { .. } => bail!("unimplemented floating-point literal"),
-        F64Const { .. } => bail!("unimplemented floating-point literal"),
+        F32Const { value } => format!("std::bit_cast<f32>(i32{{{:#010x}u}})", value.bits()),
+        F64Const { value } => format!("std::bit_cast<f64>(i64{{{:#018x}u}})", value.bits()),
         _ => panic!("const_literal called on non-numeric Wasm operator"),
     })
 }

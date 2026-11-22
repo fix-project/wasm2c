@@ -3,7 +3,7 @@ use anyhow::{Result, bail};
 use indoc::writedoc;
 use itertools::Itertools;
 use std::{fmt::Display, io::Write};
-use wast::core::{WastArgCore, WastRetCore};
+use wast::core::{NanPattern, WastArgCore, WastRetCore};
 use wast::lexer::Lexer;
 use wast::parser::{self, ParseBuffer};
 use wast::{Wast, WastArg, WastDirective, WastExecute, WastInvoke, WastRet};
@@ -34,12 +34,22 @@ pub fn wast2c<U: Write>(
 
          unsigned int g_success_count;
 
-         void assert_eq(auto x, auto y, int line_no) {{
-           if (x == y) {{
+         void assert_true(bool cond, int line_no) {{
+           if (cond) {{
              g_success_count++;
            }} else {{
              std::println(stderr, \"error, failed assertion on {{}}\", line_no);
            }}
+         }}
+
+         void assert_eq(auto x, auto y, int line_no) {{ assert_true(x == y, line_no); }}
+
+         void assert_eq(float x, float y, int line_no) {{
+           assert_true(std::bit_cast<uint32_t>(x) == std::bit_cast<uint32_t>(y), line_no);
+         }}
+
+         void assert_eq(double x, double y, int line_no) {{
+           assert_true(std::bit_cast<uint64_t>(x) == std::bit_cast<uint64_t>(y), line_no);
          }}
 
          extern \"C\" unsigned int run(void) {{
@@ -160,6 +170,12 @@ fn arg_value(arg: &WastArg<'_>) -> impl Display {
     core::fmt::from_fn(move |f| match arg {
         WastArg::Core(WastArgCore::I32(v)) => write!(f, "i32{{{}u}}", *v as u32),
         WastArg::Core(WastArgCore::I64(v)) => write!(f, "i64{{{}u}}", *v as u64),
+        WastArg::Core(WastArgCore::F32(v)) => {
+            write!(f, "std::bit_cast<f32>(i32{{{:#010x}u}})", v.bits)
+        }
+        WastArg::Core(WastArgCore::F64(v)) => {
+            write!(f, "std::bit_cast<f64>(i64{{{:#018x}u}})", v.bits)
+        }
         _ => unimplemented!("wast arg"),
     })
 }
@@ -168,6 +184,12 @@ fn ret_value(ret: &WastRet<'_>) -> impl Display {
     core::fmt::from_fn(move |f| match ret {
         WastRet::Core(WastRetCore::I32(v)) => write!(f, "i32{{{}u}}", *v as u32),
         WastRet::Core(WastRetCore::I64(v)) => write!(f, "i64{{{}u}}", *v as u64),
+        WastRet::Core(WastRetCore::F32(NanPattern::Value(v))) => {
+            write!(f, "std::bit_cast<f32>(i32{{{:#010x}u}})", v.bits)
+        }
+        WastRet::Core(WastRetCore::F64(NanPattern::Value(v))) => {
+            write!(f, "std::bit_cast<f64>(i64{{{:#018x}u}})", v.bits)
+        }
         _ => unimplemented!("wast ret"),
     })
 }
