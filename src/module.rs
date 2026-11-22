@@ -43,7 +43,7 @@ pub(crate) fn print_header_includes(out: &mut impl Write) -> Result<()> {
     writeln!(out, "#pragma once")?;
     writeln!(out)?;
 
-    let header_includes = ["cstdint", "tuple"];
+    let header_includes = ["cstdint", "tuple", "bit", "cmath"];
     for inc in header_includes {
         writeln!(out, "#include <{}>", inc)?;
     }
